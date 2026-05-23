@@ -75,20 +75,33 @@ def webhook():
 
     for event in events:
         if event.get("type") == "message" and event["message"].get("type") == "text":
+
             reply_token = event["replyToken"]
             user_message = event["message"]["text"].strip()
             user_id = event["source"]["userId"]
 
-            if user_message in ["1", "2", "3"]:
+            # 全角数字を半角に変換
+            number_map = {
+                "１": "1",
+                "２": "2",
+                "３": "3",
+            }
+
+            normalized_message = number_map.get(user_message, user_message)
+
+            # 番号返信だった場合
+            if normalized_message in ["1", "2", "3"]:
+
                 previous = last_suggestions.get(user_id)
 
                 if previous:
+
                     prompt = f"""
 前回あなたが提案した料理候補は以下です。
 
 {previous}
 
-ユーザーは「{user_message}」を選びました。
+ユーザーは「{normalized_message}」を選びました。
 
 選ばれた料理の詳しい作り方を、
 料理初心者向けに分かりやすく説明してください。
@@ -101,12 +114,16 @@ def webhook():
 ・見出し記号は禁止
 ・最後に「スクショしておくと便利だよ😊」を添える
 """
+
                     ai_text = generate_reply(prompt)
+
                 else:
                     ai_text = "前の提案が見つからなかった💦\nもう一回食材を教えて😊"
 
             else:
                 ai_text = generate_reply(user_message)
+
+                # 提案内容を保存
                 last_suggestions[user_id] = ai_text
 
             reply_to_line(reply_token, ai_text)
@@ -115,6 +132,7 @@ def webhook():
 
 def generate_reply(user_message):
     try:
+
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=[
@@ -133,9 +151,11 @@ def generate_reply(user_message):
 
     except Exception as e:
         print("OpenAI error:", e)
+
         return "ごめん💦\nちょっと調子悪いみたい。\nもう一回送ってみて😊"
 
 def clean_line_text(text):
+
     return (
         text
         .replace("**", "")
@@ -145,6 +165,7 @@ def clean_line_text(text):
     )
 
 def reply_to_line(reply_token, text):
+
     clean_text = clean_line_text(text)
 
     headers = {
