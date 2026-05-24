@@ -8,6 +8,7 @@ from supabase import create_client, Client
 app = Flask(__name__)
 
 last_suggestions = {}
+setup_sessions = {}
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -80,6 +81,25 @@ SYSTEM_PROMPT = """
 ・栄養論を押し付けない
 """
 
+TOOL_LIST = {
+    "1": "電子レンジ",
+    "2": "炊飯器",
+    "3": "フライパン",
+    "4": "鍋",
+    "5": "オーブントースター",
+    "6": "ブレンダー",
+    "7": "ホットクック",
+    "8": "食洗機",
+    "9": "すべて持っている"
+}
+
+COOKING_LEVELS = {
+    "1": "ほぼ初心者",
+    "2": "簡単な家庭料理ならできる",
+    "3": "作り置きや下味冷凍もできる",
+    "4": "料理はかなり得意"
+}
+
 @app.route("/", methods=["GET"])
 def home():
     return "LINE Bot is running!"
@@ -99,11 +119,173 @@ def webhook():
 
             normalized_message = unicodedata.normalize("NFKC", user_message).strip()
 
-            if normalized_message in ["1", "2", "3"]:
-                previous = last_suggestions.get(user_id)
+            if normalized_message == "初期設定":
+                ai_text = start_setup(user_id)
 
-                if previous:
-                    prompt = f"""
+            elif user_id in setup_sessions:
+                ai_text = handle_setup_answer(user_id, normalized_message)
+
+            elif normalized_message in ["1", "2", "3"]:
+                ai_text = handle_recipe_selection(user_id, normalized_message, user_message)
+
+            else:
+                ai_text = handle_normal_message(user_id, user_message)
+
+            reply_to_line(reply_token, ai_text)
+
+    return "OK"
+
+def start_setup(user_id):
+    setup_sessions[user_id] = {
+        "step": "family_size",
+        "data": {}
+    }
+
+    return (
+        "あなたの家庭に合った提案をするために、"
+        "いくつかだけ教えてください😊\n\n"
+        "まず、一緒に住んでいる大人は何人ですか？\n"
+        "例：2人"
+    )
+
+def handle_setup_answer(user_id, message):
+    session = setup_sessions[user_id]
+    step = session["step"]
+    data = session["data"]
+
+    if step == "family_size":
+        data["family_size"] = message
+        session["step"] = "children_info"
+
+        return (
+            "ありがとうございます😊\n\n"
+            "次に、お子さんはいますか？\n"
+            "いる場合は年齢や月齢も教えてください。\n\n"
+            "例：生後2ヶ月の子どもが1人\n"
+            "例：子どもはいない"
+        )
+
+    if step == "children_info":
+        data["children_info"] = message
+        session["step"] = "cooking_level"
+
+        return (
+            "料理の難しさを合わせたいので、料理レベルを教えてください😊\n\n"
+            "半角数字で返してください。\n\n"
+            "1. ほぼ初心者\n"
+            "2. 簡単な家庭料理ならできる\n"
+            "3. 作り置きや下味冷凍もできる\n"
+            "4. 料理はかなり得意"
+        )
+
+    if step == "cooking_level":
+        if message not in COOKING_LEVELS:
+            return (
+                "半角数字で教えてください😊\n\n"
+                "1. ほぼ初心者\n"
+                "2. 簡単な家庭料理ならできる\n"
+                "3. 作り置きや下味冷凍もできる\n"
+                "4. 料理はかなり得意"
+            )
+
+        data["cooking_level"] = COOKING_LEVELS[message]
+        session["step"] = "tools"
+
+        return (
+            "使える調理器具に合わせて提案したいので、"
+            "持っていないものを番号で教えてください😊\n\n"
+            "半角数字で、複数ある場合は「1,3,5」のように返してください。\n\n"
+            "1. 電子レンジ\n"
+            "2. 炊飯器\n"
+            "3. フライパン\n"
+            "4. 鍋\n"
+            "5. オーブントースター\n"
+            "6. ブレンダー\n"
+            "7. ホットクック\n"
+            "8. 食洗機\n"
+            "9. すべて持っている"
+        )
+
+    if step == "tools":
+        selected = [x.strip() for x in message.replace("、", ",").split(",")]
+
+        invalid = [x for x in selected if x not in TOOL_LIST]
+        if invalid:
+            return (
+                "番号で教えてください😊\n\n"
+                "複数ある場合は「1,3,5」のように返せます。\n\n"
+                "1. 電子レンジ\n"
+                "2. 炊飯器\n"
+                "3. フライパン\n"
+                "4. 鍋\n"
+                "5. オーブントースター\n"
+                "6. ブレンダー\n"
+                "7. ホットクック\n"
+                "8. 食洗機\n"
+                "9. すべて持っている"
+            )
+
+        if "9" in selected:
+            data["tools"] = "基本的な調理器具はすべて持っている"
+        else:
+            missing_tools = [TOOL_LIST[x] for x in selected]
+            data["tools"] = "持っていないもの：" + "、".join(missing_tools)
+
+        session["step"] = "shopping_frequency"
+
+        return (
+            "買い物リストを作りやすくするために、"
+            "買い物頻度を教えてください😊\n\n"
+            "例：週1回まとめ買い\n"
+            "例：週2〜3回\n"
+            "例：ほぼ毎日"
+        )
+
+    if step == "shopping_frequency":
+        data["shopping_frequency"] = message
+        session["step"] = "frozen_style"
+
+        return (
+            "平日を楽にする提案にしたいので、"
+            "冷凍ストックは活用したいですか？😊\n\n"
+            "例：かなり使いたい\n"
+            "例：少しなら使いたい\n"
+            "例：あまり使わない"
+        )
+
+    if step == "frozen_style":
+        data["frozen_style"] = message
+        session["step"] = "allergies_dislikes"
+
+        return (
+            "安全面と好みに合わせるために、"
+            "アレルギーや苦手食材があれば教えてください😊\n\n"
+            "なければ「なし」でOKです。"
+        )
+
+    if step == "allergies_dislikes":
+        data["allergies"] = message
+        data["dislikes"] = message
+
+        save_profile(user_id, data)
+        setup_sessions.pop(user_id, None)
+
+        return (
+            "初期設定できました😊\n\n"
+            "これからは、この家庭情報を前提に提案します。\n"
+            "まずは気軽に、\n"
+            "「今日のごはんどうしよう」\n"
+            "みたいに送ってください。"
+        )
+
+    setup_sessions.pop(user_id, None)
+    return "設定が途中で分からなくなりました💦\nもう一度「初期設定」と送ってください。"
+
+def handle_recipe_selection(user_id, normalized_message, original_message):
+    previous = last_suggestions.get(user_id)
+
+    if previous:
+        prompt = f"""
 前回あなたが提案した料理候補は以下です。
 
 {previous}
@@ -123,16 +305,17 @@ def webhook():
 ・追加食材が必要な場合は「買い足し」と明記する
 ・最後に「スクショしておくと便利だよ😊」を添える
 """
-                    ai_text = generate_reply(prompt)
-                    save_meal_log(user_id, user_message, ai_text, selected_menu=normalized_message)
-                else:
-                    ai_text = "前の提案が見つかりませんでした💦\nもう一回、食材を教えてください😊"
+        ai_text = generate_reply(prompt)
+        save_meal_log(user_id, original_message, ai_text, selected_menu=normalized_message)
+        return ai_text
 
-            else:
-                profile = get_profile(user_id)
-                recent_logs = get_recent_logs(user_id)
+    return "前の提案が見つかりませんでした💦\nもう一回、食材を教えてください😊"
 
-                context = f"""
+def handle_normal_message(user_id, user_message):
+    profile = get_profile(user_id)
+    recent_logs = get_recent_logs(user_id)
+
+    context = f"""
 ユーザー情報：
 {profile}
 
@@ -142,14 +325,12 @@ def webhook():
 ユーザーの今回の相談：
 {user_message}
 """
-                ai_text = generate_reply(context)
+    ai_text = generate_reply(context)
 
-                last_suggestions[user_id] = ai_text
-                save_meal_log(user_id, user_message, ai_text)
+    last_suggestions[user_id] = ai_text
+    save_meal_log(user_id, user_message, ai_text)
 
-            reply_to_line(reply_token, ai_text)
-
-    return "OK"
+    return ai_text
 
 def ensure_profile(user_id):
     try:
@@ -163,6 +344,24 @@ def ensure_profile(user_id):
 
     except Exception as e:
         print("ensure_profile error:", e)
+
+def save_profile(user_id, data):
+    try:
+        supabase.table("profiles").upsert({
+            "user_id": user_id,
+            "family_size": data.get("family_size"),
+            "children_info": data.get("children_info"),
+            "cooking_level": data.get("cooking_level"),
+            "tools": data.get("tools"),
+            "shopping_frequency": data.get("shopping_frequency"),
+            "frozen_style": data.get("frozen_style"),
+            "allergies": data.get("allergies"),
+            "dislikes": data.get("dislikes"),
+            "notes": "初期設定済み"
+        }).execute()
+
+    except Exception as e:
+        print("save_profile error:", e)
 
 def get_profile(user_id):
     try:
