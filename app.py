@@ -3,16 +3,19 @@ import requests
 import os
 import unicodedata
 from openai import OpenAI
+from supabase import create_client, Client
 
 app = Flask(__name__)
 
-# ユーザーごとの直近提案を一時保存
 last_suggestions = {}
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 SYSTEM_PROMPT = """
 あなたは「おやこ時間ごはんAI」です。
@@ -37,10 +40,8 @@ SYSTEM_PROMPT = """
 口調ルール：
 ・フランクすぎる口調を避ける
 ・友だち口調ではなく、やさしい家政婦さんくらいの距離感にする
-・「ありがたいね〜」「わかる〜」のような砕けすぎた表現は避ける
 ・丁寧すぎず、自然で落ち着いた口調にする
 ・絵文字は使いすぎない
-・相手を急かさない
 ・「今日はこれでOKです😊」のような安心感を大切にする
 
 提案ルール：
@@ -59,8 +60,6 @@ SYSTEM_PROMPT = """
 ・不明な食材を勝手にある前提にしない
 ・在庫だけで作れる案を最低1つ出す
 ・追加食材が必要な場合は「買い足し」と明記する
-・在庫食材が少ない場合は、その範囲でできる簡単メニューを優先する
-・例：ユーザーが「卵と豆腐」と言った場合、卵と豆腐だけで成立する案を中心に出す
 
 初心者向け表現ルール：
 ・「少し」「適量」「お好みで」だけで終わらせない
@@ -69,7 +68,6 @@ SYSTEM_PROMPT = """
 ・難しい調理用語は避ける
 
 レシピURLルール：
-・具体的なレシピを提案するときは、可能なら参考URLも添える
 ・存在しないURLを作らない
 ・URLが不確かな場合は無理に貼らない
 ・URLを貼れない場合は検索ワードを提案する
@@ -97,10 +95,10 @@ def webhook():
             user_message = event["message"]["text"].strip()
             user_id = event["source"]["userId"]
 
-            # 全角数字・全角スペースなどを半角に正規化
+            ensure_profile(user_id)
+
             normalized_message = unicodedata.normalize("NFKC", user_message).strip()
 
-            # 番号返信だった場合
             if normalized_message in ["1", "2", "3"]:
                 previous = last_suggestions.get(user_id)
 
@@ -126,18 +124,87 @@ def webhook():
 ・最後に「スクショしておくと便利だよ😊」を添える
 """
                     ai_text = generate_reply(prompt)
+                    save_meal_log(user_id, user_message, ai_text, selected_menu=normalized_message)
                 else:
                     ai_text = "前の提案が見つかりませんでした💦\nもう一回、食材を教えてください😊"
 
             else:
-                ai_text = generate_reply(user_message)
+                profile = get_profile(user_id)
+                recent_logs = get_recent_logs(user_id)
 
-                # 提案内容を保存
+                context = f"""
+ユーザー情報：
+{profile}
+
+最近の提案履歴：
+{recent_logs}
+
+ユーザーの今回の相談：
+{user_message}
+"""
+                ai_text = generate_reply(context)
+
                 last_suggestions[user_id] = ai_text
+                save_meal_log(user_id, user_message, ai_text)
 
             reply_to_line(reply_token, ai_text)
 
     return "OK"
+
+def ensure_profile(user_id):
+    try:
+        result = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
+
+        if not result.data:
+            supabase.table("profiles").insert({
+                "user_id": user_id,
+                "notes": "初回登録。詳細プロフィールは未設定。"
+            }).execute()
+
+    except Exception as e:
+        print("ensure_profile error:", e)
+
+def get_profile(user_id):
+    try:
+        result = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
+        if result.data:
+            return result.data[0]
+        return "プロフィール未設定"
+    except Exception as e:
+        print("get_profile error:", e)
+        return "プロフィール取得エラー"
+
+def get_recent_logs(user_id):
+    try:
+        result = (
+            supabase.table("meal_logs")
+            .select("message,suggestions,selected_menu,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+        if not result.data:
+            return "まだ提案履歴はありません。"
+
+        return result.data
+
+    except Exception as e:
+        print("get_recent_logs error:", e)
+        return "履歴取得エラー"
+
+def save_meal_log(user_id, message, suggestions, selected_menu=None):
+    try:
+        supabase.table("meal_logs").insert({
+            "user_id": user_id,
+            "message": message,
+            "suggestions": suggestions,
+            "selected_menu": selected_menu
+        }).execute()
+
+    except Exception as e:
+        print("save_meal_log error:", e)
 
 def generate_reply(user_message):
     try:
