@@ -298,30 +298,54 @@ def handle_stock_register(user_id, message):
     lines = message.splitlines()
 
     items = []
+
     for line in lines[1:]:
-        item = line.strip()
-        if item:
-            items.append(item)
+        line = line.strip()
+
+        if not line:
+            continue
+
+        parts = line.split()
+
+        if len(parts) >= 3:
+            item_name = parts[0]
+            quantity = parts[1]
+            unit = parts[2]
+
+        elif len(parts) == 2:
+            item_name = parts[0]
+            quantity = parts[1]
+            unit = ""
+
+        else:
+            item_name = line
+            quantity = ""
+            unit = ""
+
+        save_stock_item(
+            user_id,
+            item_name,
+            quantity,
+            unit
+        )
+
+        items.append(
+            f"{item_name} {quantity}{unit}"
+        )
 
     if not items:
         return (
             "在庫登録する食材を改行で送ってください😊\n\n"
             "例：\n"
             "在庫登録\n"
-            "卵 10個\n"
-            "豆腐 2丁\n"
-            "冷凍うどん 3玉"
+            "卵 10 個\n"
+            "豆腐 2 丁\n"
+            "冷凍うどん 3 玉"
         )
-
-    saved_items = []
-
-    for item in items:
-        save_stock_item(user_id, item)
-        saved_items.append(item)
 
     return (
         "在庫を登録しました😊\n\n"
-        + "\n".join([f"・{item}" for item in saved_items])
+        + "\n".join([f"・{item}" for item in items])
         + "\n\n"
         "次から「今日どうしよう」だけでも、在庫を見ながら提案できます。"
     )
@@ -440,16 +464,17 @@ def save_profile(user_id, data):
     except Exception as e:
         print("save_profile error:", e)
 
-def save_stock_item(user_id, item_text):
+def save_stock_item(user_id, item_name, quantity="", unit=""):
     try:
         supabase.table("stocks").insert({
             "user_id": user_id,
-            "item_name": item_text
+            "item_name": item_name,
+            "quantity": quantity,
+            "unit": unit
         }).execute()
 
     except Exception as e:
         print("save_stock_item error:", e)
-
 def get_stocks(user_id):
     try:
         result = (
