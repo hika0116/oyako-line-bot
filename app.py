@@ -135,6 +135,12 @@ def webhook():
             elif normalized_message.startswith("在庫登録"):
                 ai_text = handle_stock_register(user_id, user_message)
 
+            elif normalized_message.startswith("買い物した"):
+                ai_text = handle_stock_add(user_id, user_message)
+
+            elif normalized_message.startswith("使った"):
+                ai_text = handle_stock_use(user_id, user_message)
+
             elif normalized_message in ["在庫", "在庫確認"]:
                 ai_text = handle_stock_list(user_id)
 
@@ -295,9 +301,41 @@ def handle_setup_answer(user_id, message):
     return "設定が途中で分からなくなりました💦\nもう一度「初期設定」と送ってください。"
 
 def handle_stock_register(user_id, message):
-    lines = message.splitlines()
+    parsed_items = parse_stock_lines(message)
 
-    items = []
+    if not parsed_items:
+        return (
+            "在庫登録する食材を改行で送ってください😊\n\n"
+            "例：\n"
+            "在庫登録\n"
+            "卵 10 個\n"
+            "豆腐 2 丁\n"
+            "冷凍うどん 3 玉"
+        )
+
+    saved_items = []
+
+    for item in parsed_items:
+        save_stock_item(
+            user_id,
+            item["item_name"],
+            item["quantity"],
+            item["unit"]
+        )
+
+        saved_items.append(
+            f'{item["item_name"]} {item["quantity"]}{item["unit"]}'
+        )
+
+    return (
+        "在庫を登録しました😊\n\n"
+        + "\n".join([f"・{item}" for item in saved_items])
+        + "\n\n"
+        "次から「今日どうしよう」だけでも、在庫を見ながら提案できます。"
+    )
+def parse_stock_lines(message):
+    lines = message.splitlines()
+    parsed_items = []
 
     for line in lines[1:]:
         line = line.strip()
@@ -311,45 +349,23 @@ def handle_stock_register(user_id, message):
             item_name = parts[0]
             quantity = parts[1]
             unit = parts[2]
-
         elif len(parts) == 2:
             item_name = parts[0]
             quantity = parts[1]
             unit = ""
-
         else:
             item_name = line
             quantity = ""
             unit = ""
 
-        save_stock_item(
-            user_id,
-            item_name,
-            quantity,
-            unit
-        )
+        parsed_items.append({
+            "item_name": item_name,
+            "quantity": quantity,
+            "unit": unit
+        })
 
-        items.append(
-            f"{item_name} {quantity}{unit}"
-        )
-
-    if not items:
-        return (
-            "在庫登録する食材を改行で送ってください😊\n\n"
-            "例：\n"
-            "在庫登録\n"
-            "卵 10 個\n"
-            "豆腐 2 丁\n"
-            "冷凍うどん 3 玉"
-        )
-
-    return (
-        "在庫を登録しました😊\n\n"
-        + "\n".join([f"・{item}" for item in items])
-        + "\n\n"
-        "次から「今日どうしよう」だけでも、在庫を見ながら提案できます。"
-    )
-
+    return parsed_items
+    
 def handle_stock_list(user_id):
     stocks = get_stocks(user_id)
 
@@ -371,6 +387,68 @@ def handle_stock_list(user_id):
         "この在庫をもとに提案できます。"
     )
 
+def handle_stock_add(user_id, message):
+    parsed_items = parse_stock_lines(message)
+
+    if not parsed_items:
+        return (
+            "買い物したものを改行で送ってください😊\n\n"
+            "例：\n"
+            "買い物した\n"
+            "卵 10 個\n"
+            "豆腐 2 丁"
+        )
+
+    added_items = []
+
+    for item in parsed_items:
+        add_stock_quantity(
+            user_id,
+            item["item_name"],
+            item["quantity"],
+            item["unit"]
+        )
+
+        added_items.append(
+            f'{item["item_name"]} {item["quantity"]}{item["unit"]}'
+        )
+
+    return (
+        "買い物したものを在庫に追加しました😊\n\n"
+        + "\n".join([f"・{item}" for item in added_items])
+    )
+
+
+def handle_stock_use(user_id, message):
+    parsed_items = parse_stock_lines(message)
+
+    if not parsed_items:
+        return (
+            "使った食材を改行で送ってください😊\n\n"
+            "例：\n"
+            "使った\n"
+            "卵 2 個\n"
+            "豆腐 1 丁"
+        )
+
+    used_items = []
+
+    for item in parsed_items:
+        subtract_stock_quantity(
+            user_id,
+            item["item_name"],
+            item["quantity"]
+        )
+
+        used_items.append(
+            f'{item["item_name"]} {item["quantity"]}{item["unit"]}'
+        )
+
+    return (
+        "使った分を在庫から減らしました😊\n\n"
+        + "\n".join([f"・{item}" for item in used_items])
+    )
+    
 def handle_recipe_selection(user_id, normalized_message, original_message):
     previous = last_suggestions.get(user_id)
 
@@ -475,11 +553,67 @@ def save_stock_item(user_id, item_name, quantity="", unit=""):
 
     except Exception as e:
         print("save_stock_item error:", e)
+
+def add_stock_quantity(user_id, item_name, quantity, unit=""):
+    try:
+        result = (
+            supabase.table("stocks")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("item_name", item_name)
+            .limit(1)
+            .execute()
+        )
+
+        add_qty = float(quantity)
+
+        if result.data:
+            stock = result.data[0]
+            current_qty = float(stock.get("quantity") or 0)
+            new_qty = current_qty + add_qty
+
+            supabase.table("stocks").update({
+                "quantity": str(new_qty),
+                "unit": unit or stock.get("unit")
+            }).eq("id", stock["id"]).execute()
+
+        else:
+            save_stock_item(user_id, item_name, quantity, unit)
+
+    except Exception as e:
+        print("add_stock_quantity error:", e)
+
+
+def subtract_stock_quantity(user_id, item_name, quantity):
+    try:
+        result = (
+            supabase.table("stocks")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("item_name", item_name)
+            .limit(1)
+            .execute()
+        )
+
+        used_qty = float(quantity)
+
+        if result.data:
+            stock = result.data[0]
+            current_qty = float(stock.get("quantity") or 0)
+            new_qty = max(current_qty - used_qty, 0)
+
+            supabase.table("stocks").update({
+                "quantity": str(new_qty)
+            }).eq("id", stock["id"]).execute()
+
+    except Exception as e:
+        print("subtract_stock_quantity error:", e)
+
 def get_stocks(user_id):
     try:
         result = (
             supabase.table("stocks")
-            .select("item_name")
+            .select("item_name,quantity,unit")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
             .limit(50)
@@ -489,12 +623,23 @@ def get_stocks(user_id):
         if not result.data:
             return []
 
-        return [row["item_name"] for row in result.data]
+        stocks = []
+        for row in result.data:
+            item_name = row.get("item_name") or ""
+            quantity = row.get("quantity") or ""
+            unit = row.get("unit") or ""
+
+            if quantity:
+                stocks.append(f"{item_name} {quantity}{unit}")
+            else:
+                stocks.append(item_name)
+
+        return stocks
 
     except Exception as e:
         print("get_stocks error:", e)
         return []
-
+        
 def get_profile(user_id):
     try:
         result = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
