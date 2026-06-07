@@ -61,10 +61,9 @@ SYSTEM_PROMPT = """
 ・同じ食材でも、調理方法・味付け・食べ方を変える
 ・ただし、ユーザーが「昨日みたいに」「同じのでいい」と言った場合は同系統でもよい
 ・疲れている日は重複回避より簡単さを優先してよい
-・「最近似たものが多いので、今日は少し変えますね」のように自然に調整してよい
 
 在庫優先ルール：
-・ユーザーが出した食材を最優先に使う
+・ユーザーが出した食材や保存済み在庫を最優先に使う
 ・在庫にない食材を主役にした提案をしない
 ・不明な食材を勝手にある前提にしない
 ・在庫だけで作れる案を最低1つ出す
@@ -132,6 +131,12 @@ def webhook():
 
             elif user_id in setup_sessions:
                 ai_text = handle_setup_answer(user_id, normalized_message)
+
+            elif normalized_message.startswith("在庫登録"):
+                ai_text = handle_stock_register(user_id, user_message)
+
+            elif normalized_message in ["在庫", "在庫確認"]:
+                ai_text = handle_stock_list(user_id)
 
             elif normalized_message in ["1", "2", "3"]:
                 ai_text = handle_recipe_selection(user_id, normalized_message, user_message)
@@ -289,6 +294,59 @@ def handle_setup_answer(user_id, message):
     setup_sessions.pop(user_id, None)
     return "設定が途中で分からなくなりました💦\nもう一度「初期設定」と送ってください。"
 
+def handle_stock_register(user_id, message):
+    lines = message.splitlines()
+
+    items = []
+    for line in lines[1:]:
+        item = line.strip()
+        if item:
+            items.append(item)
+
+    if not items:
+        return (
+            "在庫登録する食材を改行で送ってください😊\n\n"
+            "例：\n"
+            "在庫登録\n"
+            "卵 10個\n"
+            "豆腐 2丁\n"
+            "冷凍うどん 3玉"
+        )
+
+    saved_items = []
+
+    for item in items:
+        save_stock_item(user_id, item)
+        saved_items.append(item)
+
+    return (
+        "在庫を登録しました😊\n\n"
+        + "\n".join([f"・{item}" for item in saved_items])
+        + "\n\n"
+        "次から「今日どうしよう」だけでも、在庫を見ながら提案できます。"
+    )
+
+def handle_stock_list(user_id):
+    stocks = get_stocks(user_id)
+
+    if not stocks:
+        return (
+            "まだ在庫が登録されていません😊\n\n"
+            "こんな感じで送ると登録できます。\n\n"
+            "在庫登録\n"
+            "卵 10個\n"
+            "豆腐 2丁\n"
+            "冷凍うどん 3玉"
+        )
+
+    stock_text = "\n".join([f"・{item}" for item in stocks])
+
+    return (
+        "今の登録在庫です😊\n\n"
+        f"{stock_text}\n\n"
+        "この在庫をもとに提案できます。"
+    )
+
 def handle_recipe_selection(user_id, normalized_message, original_message):
     previous = last_suggestions.get(user_id)
 
@@ -322,15 +380,20 @@ def handle_recipe_selection(user_id, normalized_message, original_message):
 def handle_normal_message(user_id, user_message):
     profile = get_profile(user_id)
     recent_logs = get_recent_logs(user_id)
+    stocks = get_stocks(user_id)
 
     context = f"""
 ユーザー情報：
 {profile}
 
+登録在庫：
+{stocks}
+
 最近の提案履歴：
 {recent_logs}
 
 重要：
+登録在庫がある場合は、その在庫を優先してください。
 最近提案した料理と同じものはできるだけ避けてください。
 同じ食材を使う場合でも、調理方法・味付け・食べ方を変えてください。
 ただし、ユーザーが「昨日みたいに」「同じのでいい」と言った場合は、同系統でも大丈夫です。
@@ -376,6 +439,36 @@ def save_profile(user_id, data):
 
     except Exception as e:
         print("save_profile error:", e)
+
+def save_stock_item(user_id, item_text):
+    try:
+        supabase.table("stocks").insert({
+            "user_id": user_id,
+            "item_name": item_text
+        }).execute()
+
+    except Exception as e:
+        print("save_stock_item error:", e)
+
+def get_stocks(user_id):
+    try:
+        result = (
+            supabase.table("stocks")
+            .select("item_name")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+
+        if not result.data:
+            return []
+
+        return [row["item_name"] for row in result.data]
+
+    except Exception as e:
+        print("get_stocks error:", e)
+        return []
 
 def get_profile(user_id):
     try:
