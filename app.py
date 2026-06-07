@@ -333,6 +333,7 @@ def handle_stock_register(user_id, message):
         + "\n\n"
         "次から「今日どうしよう」だけでも、在庫を見ながら提案できます。"
     )
+    
 def parse_stock_lines(message):
     lines = message.splitlines()
     parsed_items = []
@@ -624,13 +625,28 @@ def get_stocks(user_id):
             return []
 
         stocks = []
+
         for row in result.data:
             item_name = row.get("item_name") or ""
             quantity = row.get("quantity") or ""
             unit = row.get("unit") or ""
 
             if quantity:
-                stocks.append(f"{item_name} {quantity}{unit}")
+                try:
+                    q = float(quantity)
+
+                    if q.is_integer():
+                        quantity_display = str(int(q))
+                    else:
+                        quantity_display = str(q)
+
+                except:
+                    quantity_display = quantity
+
+                stocks.append(
+                    f"{item_name} {quantity_display}{unit}"
+                )
+
             else:
                 stocks.append(item_name)
 
@@ -638,7 +654,7 @@ def get_stocks(user_id):
 
     except Exception as e:
         print("get_stocks error:", e)
-        return []
+        return [] 
         
 def get_profile(user_id):
     try:
