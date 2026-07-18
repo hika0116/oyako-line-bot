@@ -4,3 +4,12 @@ services:
     env: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn app:app"
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: CHANNEL_SECRET
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: MEAL_SUGGESTION_TTL_SECONDS
+        value: "1800"

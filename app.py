@@ -1,94 +1,83 @@
 from flask import Flask, request
+import base64
+import hashlib
+import hmac
+import logging
 import requests
 import os
+import re
+import time
 import unicodedata
 from openai import OpenAI
 from supabase import create_client, Client
 
+from family_os import ContextBuilder, FamilyOSEngine, StructuredResponse, is_food_related
+
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
-last_suggestions = {}
-setup_sessions = {}
+# Existing in-process state is retained. Both mappings reset on restart and are
+# not shared across multiple Gunicorn workers; see README.md for this limitation.
+last_suggestions: dict[str, dict] = {}
+setup_sessions: dict[str, dict] = {}
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+FAMILY_OS_PROMPT_PATH = os.environ.get("FAMILY_OS_PROMPT_PATH")
+FAMILY_OS_DOMAIN_PROMPT_PATH = os.environ.get("FAMILY_OS_DOMAIN_PROMPT_PATH")
+APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
+MEAL_SUGGESTION_TTL_SECONDS = int(os.environ.get("MEAL_SUGGESTION_TTL_SECONDS", "1800"))
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+if APP_ENV in {"production", "prod"} and not LINE_CHANNEL_SECRET:
+    raise RuntimeError("CHANNEL_SECRET is required when APP_ENV=production")
+if not LINE_CHANNEL_SECRET:
+    logger.warning(
+        "CHANNEL_SECRET is not configured; LINE signature checks are bypassed only in development"
+    )
 
-SYSTEM_PROMPT = """
-あなたは「おやこ時間ごはんAI」です。
+def _initialize_openai_client():
+    if not OPENAI_API_KEY:
+        return None
+    try:
+        return OpenAI(api_key=OPENAI_API_KEY)
+    except Exception as exc:
+        logger.error("OpenAI client initialization failed error_type=%s", type(exc).__name__)
+        return None
 
-忙しい家庭の脳を助け、
-現実に合わせて帳尻を調整するAIです。
 
-料理を頑張らせるのではなく、
-家庭を無理なく回すことを最優先にします。
+def _initialize_supabase_client() -> Client | None:
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return None
+    try:
+        return create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as exc:
+        logger.error("Supabase client initialization failed error_type=%s", type(exc).__name__)
+        return None
 
-会話ルール：
-・LINEで会話している感覚を大切にする
-・AIっぽく説明しすぎない
-・短く自然に返す
-・まず状況を受け止める
-・長文を避ける
-・一気に大量提案しない
-・必要なら最後に1つだけ質問する
-・Markdown記法を使わない
-・太字記号や見出し記号を使わない
 
-口調ルール：
-・フランクすぎる口調を避ける
-・友だち口調ではなく、やさしい家政婦さんくらいの距離感にする
-・丁寧すぎず、自然で落ち着いた口調にする
-・絵文字は使いすぎない
-・「今日はこれでOKです😊」のような安心感を大切にする
-
-提案ルール：
-・疲れている日は最小労力を優先
-・冷凍、作り置き、時短、ベビーフードを否定しない
-・洗い物が少ない方法を優先する
-・食べたい気分を重視する
-・提案は最大3つまで
-・候補を出すときは番号付きにする
-・詳しい作り方は最初から全部書かない
-・「番号で返してくれたら作り方を書くよ」と案内する
-
-履歴活用ルール：
-・最近の提案履歴を参考にする
-・直近で提案したメニューと同じものをなるべく避ける
-・同じ食材でも、調理方法・味付け・食べ方を変える
-・ただし、ユーザーが「昨日みたいに」「同じのでいい」と言った場合は同系統でもよい
-・疲れている日は重複回避より簡単さを優先してよい
-
-在庫優先ルール：
-・ユーザーが出した食材や保存済み在庫を最優先に使う
-・在庫にない食材を主役にした提案をしない
-・不明な食材を勝手にある前提にしない
-・在庫だけで作れる案を最低1つ出す
-・追加食材が必要な場合は「買い足し」と明記する
-
-初心者向け表現ルール：
-・「少し」「適量」「お好みで」だけで終わらせない
-・量はできるだけ具体的に書く
-・例：しょうゆ小さじ1、水300ml、豆腐150g、卵1個
-・難しい調理用語は避ける
-
-レシピURLルール：
-・詳しい作り方を出すときは、参考レシピの探し方も添える
-・存在しないURLを作らない
-・URLが確実でない場合は、具体的な検索ワードを出す
-・検索ワードは料理名＋主材料＋調理方法にする
-・例：「豆腐 卵 レンジ レシピ」
-・「スクショしておくと次回楽だよ😊」を自然に添える
-
-禁止事項：
-・医療診断をしない
-・不安を強く煽らない
-・説教しない
-・栄養論を押し付けない
-"""
+client = _initialize_openai_client()
+supabase = _initialize_supabase_client()
+context_builder = ContextBuilder(book0_version="1.1", book7_version="1.0")
+family_os_engine = (
+    FamilyOSEngine(
+        client=client,
+        model=OPENAI_MODEL,
+        prompt_path=FAMILY_OS_PROMPT_PATH,
+        domain_prompt_path=FAMILY_OS_DOMAIN_PROMPT_PATH,
+    )
+    if client
+    else None
+)
 
 TOOL_LIST = {
     "1": "電子レンジ",
@@ -109,13 +98,96 @@ COOKING_LEVELS = {
     "4": "料理はかなり得意"
 }
 
+_NUMBERED_CANDIDATE_LINE = re.compile(r"^\s*([1-3])[.．、:：)]\s*(.+?)\s*$", re.MULTILINE)
+
+
+def verify_line_signature(raw_body: bytes, signature: str | None) -> bool:
+    """Verify LINE's HMAC-SHA256 signature before processing an event."""
+
+    if not LINE_CHANNEL_SECRET:
+        return APP_ENV not in {"production", "prod"}
+    if not signature:
+        return False
+    digest = hmac.new(
+        LINE_CHANNEL_SECRET.encode("utf-8"),
+        raw_body,
+        hashlib.sha256,
+    ).digest()
+    expected = base64.b64encode(digest).decode("ascii")
+    return hmac.compare_digest(expected, signature)
+
+
+def _meal_candidates_from_response(
+    result: StructuredResponse,
+    rendered_text: str,
+) -> dict[str, str]:
+    """Accept only structured, sequential choices that were actually shown."""
+
+    if result.response_mode not in {"PROPOSE", "ACT"}:
+        return {}
+    actions = [item for item in result.suggested_actions if item.action.strip()]
+    labels = [item.label.strip().rstrip(".．、:：)") for item in actions]
+    if not actions or labels != [str(index) for index in range(1, len(actions) + 1)]:
+        return {}
+
+    displayed = {
+        number: text.strip()
+        for number, text in _NUMBERED_CANDIDATE_LINE.findall(rendered_text)
+    }
+    expected = {label: action.action.strip() for label, action in zip(labels, actions)}
+    if any(displayed.get(number) != action for number, action in expected.items()):
+        return {}
+    return expected
+
+
+def _set_meal_suggestions(
+    user_id: str,
+    result: StructuredResponse,
+    rendered_text: str,
+    *,
+    food_related: bool,
+) -> None:
+    last_suggestions.pop(user_id, None)
+    if not food_related:
+        return
+    candidates = _meal_candidates_from_response(result, rendered_text)
+    if not candidates:
+        return
+    last_suggestions[user_id] = {
+        "rendered_text": rendered_text,
+        "candidates": candidates,
+        "expires_at": time.time() + MEAL_SUGGESTION_TTL_SECONDS,
+    }
+
+
+def _get_valid_meal_suggestions(user_id: str) -> dict | None:
+    state = last_suggestions.get(user_id)
+    if not isinstance(state, dict) or state.get("expires_at", 0) <= time.time():
+        last_suggestions.pop(user_id, None)
+        return None
+    candidates = state.get("candidates")
+    if not isinstance(candidates, dict) or not candidates:
+        last_suggestions.pop(user_id, None)
+        return None
+    return state
+
+
+def handle_unmatched_numeric_selection(number: str) -> str:
+    return f"「{number}」は何を選んだ番号ですか？\n料理候補なら、先に献立を相談してください。"
+
 @app.route("/", methods=["GET"])
 def home():
     return "LINE Bot is running!"
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    body = request.json
+    raw_body = request.get_data(cache=True)
+    signature = request.headers.get("X-Line-Signature")
+    if not verify_line_signature(raw_body, signature):
+        logger.warning("Rejected LINE webhook with invalid signature")
+        return "Invalid signature", 400
+
+    body = request.get_json(silent=True) or {}
     events = body.get("events", [])
 
     for event in events:
@@ -129,25 +201,34 @@ def webhook():
             normalized_message = unicodedata.normalize("NFKC", user_message).strip()
 
             if normalized_message == "初期設定":
+                last_suggestions.pop(user_id, None)
                 ai_text = start_setup(user_id)
 
             elif user_id in setup_sessions:
                 ai_text = handle_setup_answer(user_id, normalized_message)
 
             elif normalized_message.startswith("在庫登録"):
+                last_suggestions.pop(user_id, None)
                 ai_text = handle_stock_register(user_id, user_message)
 
             elif normalized_message.startswith("買い物した"):
+                last_suggestions.pop(user_id, None)
                 ai_text = handle_stock_add(user_id, user_message)
 
             elif normalized_message.startswith("使った"):
+                last_suggestions.pop(user_id, None)
                 ai_text = handle_stock_use(user_id, user_message)
 
             elif normalized_message in ["在庫", "在庫確認"]:
+                last_suggestions.pop(user_id, None)
                 ai_text = handle_stock_list(user_id)
 
             elif normalized_message in ["1", "2", "3"]:
-                ai_text = handle_recipe_selection(user_id, normalized_message, user_message)
+                state = _get_valid_meal_suggestions(user_id)
+                if state and normalized_message in state["candidates"]:
+                    ai_text = handle_recipe_selection(user_id, normalized_message, user_message)
+                else:
+                    ai_text = handle_unmatched_numeric_selection(normalized_message)
 
             else:
                 ai_text = handle_normal_message(user_id, user_message)
@@ -453,68 +534,67 @@ def handle_stock_use(user_id, message):
     )
     
 def handle_recipe_selection(user_id, normalized_message, original_message):
-    previous = last_suggestions.get(user_id)
+    state = _get_valid_meal_suggestions(user_id)
+    if not state or normalized_message not in state["candidates"]:
+        return handle_unmatched_numeric_selection(normalized_message)
 
-    if previous:
-        prompt = f"""
-前回あなたが提案した料理候補は以下です。
-
-{previous}
-
-ユーザーは「{normalized_message}」を選びました。
-
-選ばれた料理の詳しい作り方を、
-料理初心者向けに分かりやすく説明してください。
-
-条件：
-・材料は具体的な量を書く
-・LINE向けに短く
-・Markdown記法は禁止
-・太字記号は禁止
-・見出し記号は禁止
-・在庫にない食材を勝手に追加しない
-・追加食材が必要な場合は「買い足し」と明記する
-・最後に「スクショしておくと便利だよ😊」を添える
-"""
-        ai_text = generate_reply(prompt)
-        save_meal_log(user_id, original_message, ai_text, selected_menu=normalized_message)
-        return ai_text
-
-    return "前の提案が見つかりませんでした💦\nもう一回、食材を教えてください😊"
-
-def handle_normal_message(user_id, user_message):
+    # A meal choice is single-use. This prevents a later bare number from
+    # selecting an old menu after the conversation has moved on.
+    last_suggestions.pop(user_id, None)
     profile = get_profile(user_id)
     recent_logs = get_recent_logs(user_id)
     stocks = get_stocks(user_id)
+    selected_dish = state["candidates"][normalized_message]
+    context = context_builder.build(
+        f"前回の料理候補から{normalized_message}番を選びました。詳しい作り方を教えて。",
+        channel="line",
+        profile=profile,
+        food_stock=stocks,
+        recent_logs=recent_logs,
+    )
+    instructions = (
+        f"選ばれた料理は「{selected_dish}」です。"
+        "料理初心者向けに、材料の具体的な量と短い手順を説明してください。"
+        "在庫にない材料は買い足しと明記し、存在しないURLを作らないでください。"
+        "これはレシピ詳細であり、新しい番号選択候補は提示しないでください。"
+    )
+    result = generate_structured_reply(
+        context=context,
+        additional_instructions=instructions,
+    )
+    ai_text = result.user_message()
+    save_meal_log(user_id, original_message, ai_text, selected_menu=selected_dish)
+    return ai_text
 
-    context = f"""
-ユーザー情報：
-{profile}
+def handle_normal_message(user_id, user_message):
+    profile = get_profile(user_id)
+    stocks = get_stocks(user_id)
+    food_related = is_food_related(user_message, stocks)
+    recent_logs = get_recent_logs(user_id) if food_related else []
+    context = context_builder.build(
+        user_message,
+        channel="line",
+        profile=profile,
+        food_stock=stocks,
+        recent_logs=recent_logs,
+    )
+    result = generate_structured_reply(context=context)
+    ai_text = result.user_message()
 
-登録在庫：
-{stocks}
-
-最近の提案履歴：
-{recent_logs}
-
-重要：
-登録在庫がある場合は、その在庫を優先してください。
-最近提案した料理と同じものはできるだけ避けてください。
-同じ食材を使う場合でも、調理方法・味付け・食べ方を変えてください。
-ただし、ユーザーが「昨日みたいに」「同じのでいい」と言った場合は、同系統でも大丈夫です。
-疲れている相談の場合は、重複回避より簡単さを優先してください。
-
-ユーザーの今回の相談：
-{user_message}
-"""
-    ai_text = generate_reply(context)
-
-    last_suggestions[user_id] = ai_text
-    save_meal_log(user_id, user_message, ai_text)
-
+    _set_meal_suggestions(
+        user_id,
+        result,
+        ai_text,
+        food_related=food_related,
+    )
+    if food_related:
+        save_meal_log(user_id, user_message, ai_text)
     return ai_text
 
 def ensure_profile(user_id):
+    if supabase is None:
+        logger.error("Supabase is not configured")
+        return
     try:
         result = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
 
@@ -524,10 +604,13 @@ def ensure_profile(user_id):
                 "notes": "初回登録。詳細プロフィールは未設定。"
             }).execute()
 
-    except Exception as e:
-        print("ensure_profile error:", e)
+    except Exception as exc:
+        logger.error("ensure_profile failed error_type=%s", type(exc).__name__)
 
 def save_profile(user_id, data):
+    if supabase is None:
+        logger.error("Supabase is not configured")
+        return
     try:
         supabase.table("profiles").upsert({
             "user_id": user_id,
@@ -542,10 +625,13 @@ def save_profile(user_id, data):
             "notes": "初期設定済み"
         }).execute()
 
-    except Exception as e:
-        print("save_profile error:", e)
+    except Exception as exc:
+        logger.error("save_profile failed error_type=%s", type(exc).__name__)
 
 def save_stock_item(user_id, item_name, quantity="", unit=""):
+    if supabase is None:
+        logger.error("Supabase is not configured")
+        return
     try:
         supabase.table("stocks").insert({
             "user_id": user_id,
@@ -554,10 +640,13 @@ def save_stock_item(user_id, item_name, quantity="", unit=""):
             "unit": unit
         }).execute()
 
-    except Exception as e:
-        print("save_stock_item error:", e)
+    except Exception as exc:
+        logger.error("save_stock_item failed error_type=%s", type(exc).__name__)
 
 def add_stock_quantity(user_id, item_name, quantity, unit=""):
+    if supabase is None:
+        logger.error("Supabase is not configured")
+        return
     try:
         result = (
             supabase.table("stocks")
@@ -583,11 +672,14 @@ def add_stock_quantity(user_id, item_name, quantity, unit=""):
         else:
             save_stock_item(user_id, item_name, quantity, unit)
 
-    except Exception as e:
-        print("add_stock_quantity error:", e)
+    except Exception as exc:
+        logger.error("add_stock_quantity failed error_type=%s", type(exc).__name__)
 
 
 def subtract_stock_quantity(user_id, item_name, quantity):
+    if supabase is None:
+        logger.error("Supabase is not configured")
+        return
     try:
         result = (
             supabase.table("stocks")
@@ -609,10 +701,12 @@ def subtract_stock_quantity(user_id, item_name, quantity):
                 "quantity": str(new_qty)
             }).eq("id", stock["id"]).execute()
 
-    except Exception as e:
-        print("subtract_stock_quantity error:", e)
+    except Exception as exc:
+        logger.error("subtract_stock_quantity failed error_type=%s", type(exc).__name__)
 
 def get_stocks(user_id):
+    if supabase is None:
+        return []
     try:
         result = (
             supabase.table("stocks")
@@ -642,7 +736,7 @@ def get_stocks(user_id):
                     else:
                         quantity_display = str(q)
 
-                except:
+                except (TypeError, ValueError):
                     quantity_display = quantity
 
                 stocks.append(
@@ -654,21 +748,25 @@ def get_stocks(user_id):
 
         return stocks
 
-    except Exception as e:
-        print("get_stocks error:", e)
+    except Exception as exc:
+        logger.error("get_stocks failed error_type=%s", type(exc).__name__)
         return [] 
         
 def get_profile(user_id):
+    if supabase is None:
+        return {}
     try:
         result = supabase.table("profiles").select("*").eq("user_id", user_id).execute()
         if result.data:
             return result.data[0]
-        return "プロフィール未設定"
-    except Exception as e:
-        print("get_profile error:", e)
-        return "プロフィール取得エラー"
+        return {}
+    except Exception as exc:
+        logger.error("get_profile failed error_type=%s", type(exc).__name__)
+        return {}
 
 def get_recent_logs(user_id):
+    if supabase is None:
+        return []
     try:
         result = (
             supabase.table("meal_logs")
@@ -679,16 +777,16 @@ def get_recent_logs(user_id):
             .execute()
         )
 
-        if not result.data:
-            return "まだ提案履歴はありません。"
+        return result.data or []
 
-        return result.data
-
-    except Exception as e:
-        print("get_recent_logs error:", e)
-        return "履歴取得エラー"
+    except Exception as exc:
+        logger.error("get_recent_logs failed error_type=%s", type(exc).__name__)
+        return []
 
 def save_meal_log(user_id, message, suggestions, selected_menu=None):
+    if supabase is None:
+        logger.error("Supabase is not configured")
+        return
     try:
         supabase.table("meal_logs").insert({
             "user_id": user_id,
@@ -697,30 +795,42 @@ def save_meal_log(user_id, message, suggestions, selected_menu=None):
             "selected_menu": selected_menu
         }).execute()
 
-    except Exception as e:
-        print("save_meal_log error:", e)
+    except Exception as exc:
+        logger.error("save_meal_log failed error_type=%s", type(exc).__name__)
 
-def generate_reply(user_message):
-    try:
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=[
-                {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": user_message
-                }
-            ],
+def generate_structured_reply(
+    user_message=None,
+    *,
+    context=None,
+    additional_instructions=None,
+) -> StructuredResponse:
+    if context is None:
+        context = context_builder.build(str(user_message or ""), channel="line")
+    if family_os_engine is None:
+        logger.error("OPENAI_API_KEY is not configured")
+        return StructuredResponse(
+            response_mode="PROPOSE",
+            safety_level="none",
+            message="ごめんなさい。少し調子が悪いようです。もう一度送ってください。",
+            reasoning_tags=["generation_unavailable"],
+            prompt_version="1.0",
         )
+    # memory_candidates are review-only. There is deliberately no save call.
+    return family_os_engine.respond(
+        context,
+        additional_instructions=additional_instructions,
+    )
 
-        return response.output_text
 
-    except Exception as e:
-        print("OpenAI error:", e)
-        return "ごめんなさい💦\n少し調子が悪いみたいです。\nもう一回送ってみてください😊"
+def generate_reply(user_message=None, *, context=None, additional_instructions=None):
+    """Compatibility wrapper for existing callers that expect plain LINE text."""
+
+    result = generate_structured_reply(
+        user_message,
+        context=context,
+        additional_instructions=additional_instructions,
+    )
+    return result.user_message()
 
 def clean_line_text(text):
     return (
@@ -749,11 +859,16 @@ def reply_to_line(reply_token, text):
         ]
     }
 
-    requests.post(
-        "https://api.line.me/v2/bot/message/reply",
-        headers=headers,
-        json=data
-    )
+    try:
+        response = requests.post(
+            "https://api.line.me/v2/bot/message/reply",
+            headers=headers,
+            json=data,
+            timeout=10,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error("LINE reply failed error_type=%s", type(exc).__name__)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))

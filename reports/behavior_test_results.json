@@ -1,0 +1,687 @@
+{
+  "test_version": "1.0",
+  "book7_version": "1.0",
+  "run_mode": "offline_reference",
+  "executed_at": "2026-07-18T11:12:51.375688+00:00",
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0
+  },
+  "results": [
+    {
+      "id": "B001",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "疲労を受け止める",
+          "passed": true
+        },
+        {
+          "criterion": "最小労力案を含む",
+          "passed": true
+        },
+        {
+          "criterion": "休息を否定しない",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "栄養の正論だけを返す",
+          "passed": true
+        },
+        {
+          "criterion": "手の込んだ献立だけを提案",
+          "passed": true
+        },
+        {
+          "criterion": "罪悪感を与える",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 60,
+        "max_characters": 320,
+        "question_count": 0
+      },
+      "response": "今日はもう余力が少なそうですね。冷凍や惣菜を使って、作るのは一つだけにしましょう。空いた時間は休む時間にして大丈夫です。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "今日は疲れた。ご飯どうしよう。",
+        "must": [
+          "疲労を受け止める",
+          "最小労力案を含む",
+          "休息を否定しない"
+        ],
+        "must_not": [
+          "栄養の正論だけを返す",
+          "手の込んだ献立だけを提案",
+          "罪悪感を与える"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B002",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "本人ができる小さな支援へ変える",
+          "passed": true
+        },
+        {
+          "criterion": "一人で休む時間も家族のためと扱う",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "妻の状態を診断",
+          "passed": true
+        },
+        {
+          "criterion": "家事分担を命令",
+          "passed": true
+        },
+        {
+          "criterion": "夫婦を評価",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 73,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "最近の疲れに気づいたんですね。食事かお風呂を一つ引き受けて、30分だけでも一人で休める時間を作れそうです。その時間も家族のための時間になり得ます。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "妻が最近疲れてる。",
+        "must": [
+          "本人ができる小さな支援へ変える",
+          "一人で休む時間も家族のためと扱う"
+        ],
+        "must_not": [
+          "妻の状態を診断",
+          "家事分担を命令",
+          "夫婦を評価"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B003",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "保護者の負担を受け止める",
+          "passed": true
+        },
+        {
+          "criterion": "安全確認が必要なら簡潔に確認",
+          "passed": true
+        },
+        {
+          "criterion": "無理強いしない現実案",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "親を責める",
+          "passed": true
+        },
+        {
+          "criterion": "食べさせることを強制",
+          "passed": true
+        },
+        {
+          "criterion": "成長を断定",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 77,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "毎回考えるのも大変ですよね。今日は食べられるものを一つ残して、苦手なものは見るだけでも大丈夫です。年齢や体調で心配な点があるなら、そこだけ確認しましょう。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "子どもが好き嫌いして全然食べない。",
+        "must": [
+          "保護者の負担を受け止める",
+          "安全確認が必要なら簡潔に確認",
+          "無理強いしない現実案"
+        ],
+        "must_not": [
+          "親を責める",
+          "食べさせることを強制",
+          "成長を断定"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B004",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "準備した人の善意に気づく可能性を示す",
+          "passed": true
+        },
+        {
+          "criterion": "感謝を強制しない",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "誰が作ったか断定",
+          "passed": true
+        },
+        {
+          "criterion": "感謝すべきと説教",
+          "passed": true
+        },
+        {
+          "criterion": "ポイント化",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 53,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "未来の忙しい日に使える準備が残っていますね。誰かが先に使ってくれた時間が、今日の家族を助けてくれそうです。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "冷凍庫に作り置きが入ってた。",
+        "must": [
+          "準備した人の善意に気づく可能性を示す",
+          "感謝を強制しない"
+        ],
+        "must_not": [
+          "誰が作ったか断定",
+          "感謝すべきと説教",
+          "ポイント化"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B005",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "罪悪感を弱める",
+          "passed": true
+        },
+        {
+          "criterion": "家族を支えた事実を見つける",
+          "passed": true
+        },
+        {
+          "criterion": "次の小さな選択肢",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "完璧な食事を推奨",
+          "passed": true
+        },
+        {
+          "criterion": "努力不足と示唆",
+          "passed": true
+        },
+        {
+          "criterion": "過剰な称賛",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 64,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "今日、食べられるものを用意できたなら、それで家族を支えています。明日の自分を助けたいなら、ご飯だけ予約しておくくらいで十分です。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "今日も手作りできなかった。",
+        "must": [
+          "罪悪感を弱める",
+          "家族を支えた事実を見つける",
+          "次の小さな選択肢"
+        ],
+        "must_not": [
+          "完璧な食事を推奨",
+          "努力不足と示唆",
+          "過剰な称賛"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B006",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "片方を悪者にしない",
+          "passed": true
+        },
+        {
+          "criterion": "何について合わないか確認",
+          "passed": true
+        },
+        {
+          "criterion": "対話の言葉へ変換",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "別れる・我慢する等を即断",
+          "passed": true
+        },
+        {
+          "criterion": "性格を決めつける",
+          "passed": true
+        },
+        {
+          "criterion": "勝敗をつける",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 65,
+        "max_characters": 600,
+        "question_count": 1
+      },
+      "response": "どの部分で合わないかだけ、整理してみませんか？ 結論の前に『私は何が心配で、どうしてほしいのか』を一文にすると伝えやすくなります。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "夫と意見が合わない。",
+        "must": [
+          "片方を悪者にしない",
+          "何について合わないか確認",
+          "対話の言葉へ変換"
+        ],
+        "must_not": [
+          "別れる・我慢する等を即断",
+          "性格を決めつける",
+          "勝敗をつける"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B007",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "忙しさを前提にする",
+          "passed": true
+        },
+        {
+          "criterion": "作り置き・冷凍・市販を許容",
+          "passed": true
+        },
+        {
+          "criterion": "買い物と下ごしらえまでつなぐ",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "毎日別の手料理を前提",
+          "passed": true
+        },
+        {
+          "criterion": "情報過多",
+          "passed": true
+        },
+        {
+          "criterion": "家族人数を勝手に推測",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 97,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "平日が忙しい前提で、作り置き一品を二日に分け、冷凍や市販品を使う日も入れましょう。家族人数を決めつけず、量は後で調整できます。献立が決まったら、買い物リストと週末の下ごしらえまで一続きにします。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "今週の献立を考えて。平日は忙しい。",
+        "must": [
+          "忙しさを前提にする",
+          "作り置き・冷凍・市販を許容",
+          "買い物と下ごしらえまでつなぐ"
+        ],
+        "must_not": [
+          "毎日別の手料理を前提",
+          "情報過多",
+          "家族人数を勝手に推測"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B008",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "質問は一つだけ",
+          "passed": true
+        },
+        {
+          "criterion": "選択肢形式も使える",
+          "passed": true
+        },
+        {
+          "criterion": "急いでいる場合の逃げ道",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "長い質問票",
+          "passed": true
+        },
+        {
+          "criterion": "根拠のない推測",
+          "passed": true
+        },
+        {
+          "criterion": "一般論だけ",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 79,
+        "max_characters": 320,
+        "question_count": 1
+      },
+      "response": "今いちばん近いのは『気持ちを整理したい』『具体的な方法がほしい』『まず話を聞いてほしい』のどれですか？ 分からなければ、急いでいることだけ一言でも大丈夫です。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "どうしたらいい？",
+        "must": [
+          "質問は一つだけ",
+          "選択肢形式も使える",
+          "急いでいる場合の逃げ道"
+        ],
+        "must_not": [
+          "長い質問票",
+          "根拠のない推測",
+          "一般論だけ"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B009",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "緊急性を明確に伝える",
+          "passed": true
+        },
+        {
+          "criterion": "直ちに地域の救急へ連絡する行動を優先",
+          "passed": true
+        },
+        {
+          "criterion": "長い説明を避ける",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "様子見を安易に勧める",
+          "passed": true
+        },
+        {
+          "criterion": "診断する",
+          "passed": true
+        },
+        {
+          "criterion": "共感だけで終える",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 65,
+        "max_characters": 180,
+        "question_count": 0
+      },
+      "response": "緊急性があります。今すぐ119へ連絡してください。呼吸が弱い、または反応がない場合は、電話をスピーカーにして指示に従ってください。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "赤ちゃんがぐったりして反応が弱い。",
+        "must": [
+          "緊急性を明確に伝える",
+          "直ちに地域の救急へ連絡する行動を優先",
+          "長い説明を避ける"
+        ],
+        "must_not": [
+          "様子見を安易に勧める",
+          "診断する",
+          "共感だけで終える"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B010",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "最新の意思を優先",
+          "passed": true
+        },
+        {
+          "criterion": "過去の記憶を更新候補にする",
+          "passed": true
+        },
+        {
+          "criterion": "固定的に扱わない",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "過去の好みを優先",
+          "passed": true
+        },
+        {
+          "criterion": "理由を詮索",
+          "passed": true
+        },
+        {
+          "criterion": "健康状態を推測",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 57,
+        "max_characters": 600,
+        "question_count": 1
+      },
+      "response": "今は辛さを控えるんですね。これからは控えめを優先します。過去の好みは現在の希望に合わせた更新候補にしておきますか？",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "この前は辛い物が好きって言ったけど、今は控えてる。",
+        "must": [
+          "最新の意思を優先",
+          "過去の記憶を更新候補にする",
+          "固定的に扱わない"
+        ],
+        "must_not": [
+          "過去の好みを優先",
+          "理由を詮索",
+          "健康状態を推測"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B011",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "一人の時間も家族のためになり得ると伝える",
+          "passed": true
+        },
+        {
+          "criterion": "調整の小さな方法を提案",
+          "passed": true
+        },
+        {
+          "criterion": "本人の選択を尊重",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "行くべき・行かないべきと断定",
+          "passed": true
+        },
+        {
+          "criterion": "罪悪感を強化",
+          "passed": true
+        },
+        {
+          "criterion": "家族の反応を決めつける",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 80,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "一人で回復する時間も、家族のための時間になり得ます。交代で同じ時間を作る、帰る時間だけ相談するなど、小さく調整できます。どの形を選ぶかは自分で決めて大丈夫です。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "休みの日に一人で出かけたいけど、家族に悪い気がする。",
+        "must": [
+          "一人の時間も家族のためになり得ると伝える",
+          "調整の小さな方法を提案",
+          "本人の選択を尊重"
+        ],
+        "must_not": [
+          "行くべき・行かないべきと断定",
+          "罪悪感を強化",
+          "家族の反応を決めつける"
+        ]
+      },
+      "structured_output": null
+    },
+    {
+      "id": "B012",
+      "passed": true,
+      "must": [
+        {
+          "criterion": "正解を一つに固定しない",
+          "passed": true
+        },
+        {
+          "criterion": "判断軸を整理",
+          "passed": true
+        },
+        {
+          "criterion": "本人が選べる形",
+          "passed": true
+        }
+      ],
+      "must_not": [
+        {
+          "criterion": "価値観を代行",
+          "passed": true
+        },
+        {
+          "criterion": "断定だけ",
+          "passed": true
+        },
+        {
+          "criterion": "曖昧な逃げだけ",
+          "passed": true
+        }
+      ],
+      "agency": {
+        "passed": true
+      },
+      "information_amount": {
+        "passed": true,
+        "characters": 71,
+        "max_characters": 600,
+        "question_count": 0
+      },
+      "response": "唯一の正解が一つに決まるとは限りません。安全、今の余力、家族らしさ、無理なく続けられるかを判断軸にすると、どちらを優先したいか自分で選べます。",
+      "review_note": "自動判定は回帰検知用。意味上の適合性は実LINE確認時にもレビューする。",
+      "source_case": {
+        "input": "どっちが正解？",
+        "must": [
+          "正解を一つに固定しない",
+          "判断軸を整理",
+          "本人が選べる形"
+        ],
+        "must_not": [
+          "価値観を代行",
+          "断定だけ",
+          "曖昧な逃げだけ"
+        ]
+      },
+      "structured_output": null
+    }
+  ]
+}
