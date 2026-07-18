@@ -225,12 +225,66 @@ class ExistingFeatureRegressionTests(unittest.TestCase):
             "少し使いたい",
             "卵アレルギー",
         ]
-        with patch.object(line_app, "save_profile") as save:
+        with patch.object(line_app, "save_profile", return_value=True) as save:
             for answer in answers:
                 final_text = line_app.handle_setup_answer(user_id, answer)
         save.assert_called_once()
         self.assertNotIn(user_id, line_app.setup_sessions)
         self.assertIn("初期設定できました", final_text)
+
+    def test_save_profile_upserts_placeholder_by_user_id(self):
+        fake_supabase = Mock()
+        table = fake_supabase.table.return_value
+        table.upsert.return_value.execute.return_value = Mock()
+        profile = {
+            "family_size": "大人2人",
+            "children_info": "子ども1人",
+            "cooking_level": "簡単な家庭料理ならできる",
+            "tools": "持っていないもの：オーブン",
+            "shopping_frequency": "週2回",
+            "frozen_style": "少し使いたい",
+            "allergies": "なし",
+            "dislikes": "なし",
+        }
+
+        with patch.object(line_app, "supabase", fake_supabase):
+            saved = line_app.save_profile("setup-user", profile)
+
+        self.assertTrue(saved)
+        fake_supabase.table.assert_called_once_with("profiles")
+        payload = table.upsert.call_args.args[0]
+        self.assertEqual(table.upsert.call_args.kwargs["on_conflict"], "user_id")
+        self.assertEqual(payload["user_id"], "setup-user")
+        self.assertEqual(payload["family_size"], "大人2人")
+        self.assertEqual(payload["notes"], "初期設定済み")
+
+    def test_save_profile_failure_returns_false_without_logging_exception_text(self):
+        fake_supabase = Mock()
+        request = fake_supabase.table.return_value.upsert.return_value
+        request.execute.side_effect = RuntimeError("do-not-log-secret")
+
+        with patch.object(line_app, "supabase", fake_supabase), \
+             self.assertLogs(line_app.logger, level="ERROR") as captured:
+            saved = line_app.save_profile("setup-user", {})
+
+        self.assertFalse(saved)
+        logs = "\n".join(captured.output)
+        self.assertIn("RuntimeError", logs)
+        self.assertNotIn("do-not-log-secret", logs)
+
+    def test_setup_does_not_claim_completion_when_profile_save_fails(self):
+        user_id = "setup-user"
+        line_app.setup_sessions[user_id] = {
+            "step": "allergies_dislikes",
+            "data": {"family_size": "大人2人"},
+        }
+
+        with patch.object(line_app, "save_profile", return_value=False):
+            response = line_app.handle_setup_answer(user_id, "なし")
+
+        self.assertNotIn("初期設定できました", response)
+        self.assertIn("保存できませんでした", response)
+        self.assertIn(user_id, line_app.setup_sessions)
 
     def test_stock_register_add_use_and_list_handlers_remain_connected(self):
         with patch.object(line_app, "save_stock_item") as register:

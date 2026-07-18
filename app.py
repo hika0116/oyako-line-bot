@@ -369,7 +369,13 @@ def handle_setup_answer(user_id, message):
         data["allergies"] = message
         data["dislikes"] = message
 
-        save_profile(user_id, data)
+        if not save_profile(user_id, data):
+            return (
+                "初期設定の内容を保存できませんでした。\n"
+                "設定はまだ完了していません。\n"
+                "少し待って、アレルギーや苦手食材をもう一度送ってください。"
+            )
+
         setup_sessions.pop(user_id, None)
 
         return (
@@ -610,23 +616,32 @@ def ensure_profile(user_id):
 def save_profile(user_id, data):
     if supabase is None:
         logger.error("Supabase is not configured")
-        return
+        return False
     try:
-        supabase.table("profiles").upsert({
-            "user_id": user_id,
-            "family_size": data.get("family_size"),
-            "children_info": data.get("children_info"),
-            "cooking_level": data.get("cooking_level"),
-            "tools": data.get("tools"),
-            "shopping_frequency": data.get("shopping_frequency"),
-            "frozen_style": data.get("frozen_style"),
-            "allergies": data.get("allergies"),
-            "dislikes": data.get("dislikes"),
-            "notes": "初期設定済み"
-        }).execute()
+        (
+            supabase.table("profiles")
+            .upsert(
+                {
+                    "user_id": user_id,
+                    "family_size": data.get("family_size"),
+                    "children_info": data.get("children_info"),
+                    "cooking_level": data.get("cooking_level"),
+                    "tools": data.get("tools"),
+                    "shopping_frequency": data.get("shopping_frequency"),
+                    "frozen_style": data.get("frozen_style"),
+                    "allergies": data.get("allergies"),
+                    "dislikes": data.get("dislikes"),
+                    "notes": "初期設定済み",
+                },
+                on_conflict="user_id",
+            )
+            .execute()
+        )
+        return True
 
     except Exception as exc:
         logger.error("save_profile failed error_type=%s", type(exc).__name__)
+        return False
 
 def save_stock_item(user_id, item_name, quantity="", unit=""):
     if supabase is None:
