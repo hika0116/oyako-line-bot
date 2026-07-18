@@ -94,6 +94,14 @@ def route_response_mode(
         return ResponseMode.SAFETY
 
     text = message.strip()
+    if re.search(
+        r"(\d+\s*人分にして|半分の量にして|倍量にして|もっと簡単にして|"
+        r"電子レンジで作れる|味を薄めにして|子ども向けにして|"
+        r"この料理に合う副菜|買い足しを減らして)",
+        text,
+    ):
+        return ResponseMode.ACT
+
     if not text or re.fullmatch(r"(どうしたらいい|どうすればいい|どうしよう)[？?。！!]*", text):
         return ResponseMode.CLARIFY
 

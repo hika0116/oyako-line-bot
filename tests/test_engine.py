@@ -191,6 +191,121 @@ class EngineTests(unittest.TestCase):
         self.assertIn("冷凍餃子", result.user_message())
         self.assertNotIn("inventory_policy_fallback", result.reasoning_tags)
 
+    def test_vague_consultation_is_not_narrowed_to_one_inventory_candidate(self):
+        fake = FakeClient(valid_payload(
+            message="今日はお疲れかもしれませんね。",
+            suggested_actions=[
+                {
+                    "label": "1",
+                    "effort": "minimum",
+                    "action": "豚肉炒め（豚肉を使用。買い足し：なし）",
+                },
+            ],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            food_stock=["豚肉 300g", "鶏肉 300g", "じゃがいも 4個"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertEqual(len(result.suggested_actions), 3)
+        self.assertNotIn("お疲れ", result.message)
+        self.assertNotIn("余力が少な", result.message)
+        for action in result.suggested_actions:
+            self.assertTrue(any(
+                stock in action.action
+                for stock in ("豚肉", "鶏肉", "じゃがいも")
+            ))
+
+    def test_explicit_fatigue_limits_inventory_candidates_to_one(self):
+        fake = FakeClient(valid_payload(
+            message="候補です。",
+            suggested_actions=[
+                {
+                    "label": "1",
+                    "effort": "minimum",
+                    "action": "豚肉炒め（豚肉を使用。買い足し：なし）",
+                },
+                {
+                    "label": "2",
+                    "effort": "low",
+                    "action": "鶏肉煮（鶏肉を使用。買い足し：なし）",
+                },
+            ],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日は疲れた。ごはんどうしよう",
+            food_stock=["豚肉 300g", "鶏肉 300g"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertEqual(len(result.suggested_actions), 1)
+        self.assertIn("豚肉", result.suggested_actions[0].action)
+        self.assertIn("一つに絞ります", result.message)
+
+    def test_condition_refinement_keeps_stock_and_rejects_unregistered_beef(self):
+        fake = FakeClient(valid_payload(
+            message="がっつり候補です。",
+            suggested_actions=[
+                {
+                    "label": "1",
+                    "effort": "low",
+                    "action": "牛肉とじゃがいもの炒め物（じゃがいもを使用。買い足し：牛肉）",
+                },
+                {
+                    "label": "2",
+                    "effort": "low",
+                    "action": "牛肉丼（豚肉は副菜に使用。買い足し：牛肉）",
+                },
+            ],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        stocks = ["豚肉 300g", "鶏肉 300g", "じゃがいも 4個", "白菜 1玉", "ナス 2本"]
+        context = self.builder.build("がっつりしたものがいい", food_stock=stocks)
+
+        result = engine.respond(context)
+
+        self.assertEqual(context["resources"]["food_stock"], stocks)
+        self.assertEqual(len(result.suggested_actions), 3)
+        self.assertNotIn("牛肉", result.user_message())
+        for action in result.suggested_actions:
+            self.assertTrue(any(
+                name in action.action
+                for name in ("豚肉", "鶏肉", "じゃがいも", "白菜", "ナス")
+            ))
+
+    def test_allergy_is_kept_when_inventory_candidates_are_validated(self):
+        fake = FakeClient(valid_payload(
+            message="在庫候補です。",
+            suggested_actions=[
+                {
+                    "label": "1",
+                    "effort": "low",
+                    "action": "牛肉炒め（牛肉を使用。買い足し：なし）",
+                },
+                {
+                    "label": "2",
+                    "effort": "low",
+                    "action": "豚肉炒め（豚肉を使用。買い足し：なし）",
+                },
+            ],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "がっつりしたものがいい",
+            profile={"allergies": "牛肉アレルギー"},
+            food_stock=["牛肉 300g", "豚肉 300g"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertNotIn("牛肉", result.user_message())
+        self.assertTrue(all("豚肉" in action.action for action in result.suggested_actions))
+
 
 if __name__ == "__main__":
     unittest.main()

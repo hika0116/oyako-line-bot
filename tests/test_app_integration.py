@@ -95,6 +95,7 @@ class LineSignatureTests(unittest.TestCase):
 class MealLogAndSuggestionStateTests(unittest.TestCase):
     def setUp(self):
         line_app.last_suggestions.clear()
+        line_app.last_recipes.clear()
 
     def _normal_patches(self, result):
         return (
@@ -229,8 +230,122 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
             detail = line_app.handle_recipe_selection("u1", "1", "1")
         self.assertIn("卵2個", detail)
         self.assertNotIn("u1", line_app.last_suggestions)
+        self.assertEqual(line_app.last_recipes["u1"]["selected_dish"], "親子丼")
         self.assertEqual(save.call_count, 2)
         self.assertEqual(save.call_args.kwargs["selected_menu"], "親子丼")
+
+    def test_selected_recipe_followup_keeps_dish_and_adjusts_servings(self):
+        proposal = structured(
+            message="候補です。",
+            actions=[
+                SuggestedAction(
+                    "1",
+                    "low",
+                    "豚肉とじゃがいもの炒め煮（豚肉・じゃがいもを使用。買い足し：なし）",
+                ),
+                SuggestedAction(
+                    "2",
+                    "low",
+                    "鶏肉と白菜の煮物（鶏肉・白菜を使用。買い足し：なし）",
+                ),
+            ],
+        )
+        recipe = structured(
+            mode="ACT",
+            message=(
+                "豚肉とじゃがいもの炒め煮（2人分）\n"
+                "材料：豚肉300g、じゃがいも4個、たまねぎ1個"
+            ),
+        )
+        adjusted = structured(
+            mode="ACT",
+            message=(
+                "豚肉とじゃがいもの炒め煮（1人分）\n"
+                "材料：豚肉150g、じゃがいも2個、たまねぎ1/2個"
+            ),
+            actions=[SuggestedAction("1", "low", "納豆ごはん")],
+        )
+        stocks = ["豚肉 300g", "鶏肉 300g", "じゃがいも 4個", "白菜 1玉"]
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=stocks), \
+             patch.object(
+                 line_app,
+                 "generate_structured_reply",
+                 side_effect=[proposal, recipe, adjusted],
+             ) as generate, \
+             patch.object(line_app, "save_meal_log") as save:
+            line_app.handle_normal_message("u1", "今日どうしよ")
+            line_app.handle_recipe_selection("u1", "1", "1")
+            reply = line_app.handle_normal_message("u1", "今日は1人分にして")
+
+        self.assertIn("豚肉とじゃがいもの炒め煮", reply)
+        self.assertIn("豚肉150g", reply)
+        self.assertIn("じゃがいも2個", reply)
+        self.assertNotIn("納豆ごはん", reply)
+        self.assertNotIn("u1", line_app.last_suggestions)
+        self.assertEqual(line_app.last_recipes["u1"]["servings"], 1)
+        self.assertEqual(save.call_count, 3)
+        followup_instructions = generate.call_args_list[2].kwargs["additional_instructions"]
+        self.assertIn("直前に表示した料理", followup_instructions)
+        self.assertIn("豚肉300g", followup_instructions)
+        self.assertIn("新しい番号選択候補は提示しない", followup_instructions)
+
+    def test_recipe_followup_without_state_asks_once_and_skips_new_candidates(self):
+        with patch.object(line_app, "generate_structured_reply") as generate:
+            reply = line_app.handle_normal_message("u1", "1人分にして")
+
+        generate.assert_not_called()
+        self.assertIn("どの料理", reply)
+        self.assertEqual(reply.count("？") + reply.count("?"), 1)
+        self.assertNotRegex(reply, r"(?m)^[1-3][.．、:：)]")
+        self.assertNotIn("u1", line_app.last_suggestions)
+
+    def test_last_recipe_expires_and_inventory_feature_clears_it(self):
+        line_app.last_recipes["u1"] = {
+            "selected_dish": "親子丼",
+            "candidate_text": "親子丼",
+            "recipe_text": "親子丼（2人分）",
+            "displayed_at": time.time() - 2000,
+            "expires_at": time.time() - 1,
+            "servings": 2,
+        }
+        self.assertIsNone(line_app._get_valid_last_recipe("u1"))
+        self.assertNotIn("u1", line_app.last_recipes)
+
+        line_app._set_last_recipe(
+            "u1",
+            selected_dish="親子丼",
+            candidate_text="親子丼",
+            recipe_text="親子丼（2人分）",
+        )
+        with patch.object(line_app, "get_stocks", return_value=["卵 4個"]):
+            line_app.handle_stock_list("u1")
+        self.assertNotIn("u1", line_app.last_recipes)
+
+    def test_new_meal_consultation_replaces_previous_recipe_state(self):
+        line_app._set_last_recipe(
+            "u1",
+            selected_dish="親子丼",
+            candidate_text="親子丼",
+            recipe_text="親子丼（2人分）",
+        )
+        proposal = structured(
+            message="新しい候補です。",
+            actions=[
+                SuggestedAction("1", "low", "豚肉炒め（豚肉を使用。買い足し：なし）"),
+                SuggestedAction("2", "low", "鶏肉煮（鶏肉を使用。買い足し：なし）"),
+            ],
+        )
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "鶏肉 300g"]), \
+             patch.object(line_app, "generate_structured_reply", return_value=proposal), \
+             patch.object(line_app, "save_meal_log"):
+            line_app.handle_normal_message("u1", "今日どうしよ")
+
+        self.assertNotIn("u1", line_app.last_recipes)
+        self.assertIsNotNone(line_app._get_valid_meal_suggestions("u1"))
 
 
 class ExistingFeatureRegressionTests(unittest.TestCase):

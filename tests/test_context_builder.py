@@ -60,6 +60,8 @@ class ContextBuilderTests(unittest.TestCase):
         self.assertTrue(is_food_related("今週の献立を考えて"))
         self.assertTrue(is_food_related("卵で何作れる？", ["卵 6個"]))
         self.assertTrue(is_food_related("今日どうしよう", ["卵 14個", "豆腐 2丁"]))
+        self.assertTrue(is_food_related("今日どうしよ", ["卵 14個", "豆腐 2丁"]))
+        self.assertTrue(is_food_related("がっつりしたものがいい", ["豚肉 300g"]))
         self.assertFalse(is_food_related("夫と意見が合わない"))
         self.assertFalse(is_food_related("頭が痛くて不安"))
         self.assertFalse(is_food_related("どうしたらいい？", ["卵 14個"]))
@@ -72,6 +74,32 @@ class ContextBuilderTests(unittest.TestCase):
         )
 
         self.assertEqual(context["resources"]["food_stock"], ["卵 14個", "豆腐 2丁"])
+
+    def test_vague_meal_consultation_does_not_infer_fatigue(self):
+        for message in ("今日どうしよう", "今日はどうしよ"):
+            with self.subTest(message=message):
+                context = self.builder.build(
+                    message,
+                    food_stock=["豚肉 300g", "じゃがいも 4個"],
+                )
+                self.assertEqual(context["current_state"]["physical_energy"], "unknown")
+                self.assertEqual(context["current_state"]["mental_energy"], "unknown")
+                self.assertIsNone(context["current_state"]["stated_emotion"])
+
+    def test_only_explicit_low_capacity_language_sets_low_capacity(self):
+        messages = (
+            "疲れた。ごはんどうしよう",
+            "今日は無理。ごはんどうしよう",
+            "何もしたくない。すぐ食べたい",
+            "洗い物を減らしたい",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                context = self.builder.build(message)
+                self.assertTrue(
+                    context["current_state"]["physical_energy"] == "low"
+                    or context["current_state"]["mental_energy"] == "low"
+                )
 
 
 if __name__ == "__main__":

@@ -19,7 +19,12 @@ _FOOD_TERMS = re.compile(
 _VAGUE_MEAL_CONSULTATION = re.compile(
     r"^(?:今日|今夜|今晩|晩|夜)[、,\s]*(?:の)?"
     r"(?:ご飯|ごはん|献立|夕飯|晩ご飯|晩ごはん)?(?:は|を)?"
-    r"(?:どうしよう|どうする|何にしよう|何しよう)[？?。！!]*$"
+    r"(?:どうしよう|どうしよ|どうする|何にしよう|何しよう)[？?。！!]*$"
+)
+_MEAL_CONDITION_OR_FOLLOWUP = re.compile(
+    r"(ボリュームがある|がっつり|あっさり|\d+\s*人分(?:がいい|にして)|"
+    r"半分の量|倍量|肉を使いたい|野菜を多め|買い足し(?:なし|を減ら)|"
+    r"もっと簡単にして|電子レンジで作れる|味を薄め|子ども向け)"
 )
 
 
@@ -34,7 +39,11 @@ def is_food_related(message: str, stocks: Iterable[str] | None = None) -> bool:
     normalized = str(message or "").strip()
     if not normalized:
         return False
-    if _FOOD_TERMS.search(normalized) or _VAGUE_MEAL_CONSULTATION.search(normalized):
+    if (
+        _FOOD_TERMS.search(normalized)
+        or _VAGUE_MEAL_CONSULTATION.search(normalized)
+        or _MEAL_CONDITION_OR_FOLLOWUP.search(normalized)
+    ):
         return True
 
     for stock in stocks or []:
@@ -70,7 +79,12 @@ def _current_state(message: str) -> dict[str, Any]:
     if re.search(r"(疲れた|へとへと|ぐったり|体力がない)", message):
         physical_energy = "low"
         stated_emotion = "fatigue"
-    if re.search(r"(考えられない|気力がない|余力がない|しんどい|限界)", message):
+    if re.search(
+        r"(考えられない|気力がない|余力がない|しんどい|限界|今日は無理|"
+        r"何もしたくない|手抜きしたい|とにかく簡単に|すぐ食べたい|"
+        r"洗い物を減らしたい)",
+        message,
+    ):
         mental_energy = "low"
         stated_emotion = stated_emotion or "low_capacity"
     elif "疲れた" in message:

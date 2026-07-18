@@ -45,6 +45,12 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(safety.level, SafetyLevel.EMERGENCY)
         self.assertEqual(route_response_mode(message, context, safety), ResponseMode.SAFETY)
 
+    def test_recipe_adjustment_routes_to_act(self):
+        message = "今日は1人分にして"
+        context = self.builder.build(message)
+        safety = detect_safety(message, context)
+        self.assertEqual(route_response_mode(message, context, safety), ResponseMode.ACT)
+
 
 if __name__ == "__main__":
     unittest.main()

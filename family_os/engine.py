@@ -47,6 +47,23 @@ _UNREGISTERED_STAPLE_TERMS = (
     "ハム",
     "ウインナー",
 )
+_PROTEIN_TERMS = (
+    "鶏肉",
+    "豚肉",
+    "牛肉",
+    "ひき肉",
+    "魚",
+    "鮭",
+    "さば",
+    "サバ",
+    "ツナ",
+    "ベーコン",
+    "ハム",
+    "ウインナー",
+    "卵",
+    "豆腐",
+    "納豆",
+)
 
 
 def _is_low_capacity(context: Mapping[str, Any]) -> bool:
@@ -63,6 +80,35 @@ def _stock_item_names(context: Mapping[str, Any]) -> list[str]:
         if name and name not in names:
             names.append(name)
     return names
+
+
+def _food_exclusion_terms(context: Mapping[str, Any]) -> list[str]:
+    profile = context.get("family_profile") or {}
+    entries = [
+        *(profile.get("dietary_restrictions") or []),
+        *(profile.get("stable_preferences") or []),
+    ]
+    terms = []
+    raw_values = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        value = str(entry.get("value") or "").strip()
+        if not value or value in {"なし", "特になし", "未設定"}:
+            continue
+        raw_values.append(value)
+        for part in re.split(r"[、,・/]", value):
+            term = re.sub(
+                r"(アレルギー|アレルギ|が苦手|苦手|が嫌い|嫌い|避けたい|控えたい)",
+                "",
+                part,
+            ).strip(" はをがの")
+            if term and term not in terms:
+                terms.append(term)
+    for stock_name in _stock_item_names(context):
+        if any(stock_name in value for value in raw_values) and stock_name not in terms:
+            terms.append(stock_name)
+    return terms
 
 
 def _is_recipe_detail_request(
@@ -98,8 +144,15 @@ def _term_is_registered(term: str, stock_names: list[str]) -> bool:
 def _candidate_actions_are_inventory_based(
     actions: list[SuggestedAction],
     stock_names: list[str],
+    *,
+    low_capacity: bool,
+    exclusion_terms: list[str],
 ) -> bool:
     if not actions:
+        return False
+    if low_capacity and len(actions) != 1:
+        return False
+    if not low_capacity and len(actions) < 2:
         return False
 
     labels = [item.label.strip().rstrip(".．、:：)") for item in actions]
@@ -110,6 +163,8 @@ def _candidate_actions_are_inventory_based(
         action = item.action.strip()
         if not action or not any(name in action for name in stock_names):
             return False
+        if any(term in action for term in exclusion_terms):
+            return False
         buy_match = re.search(r"買い足し\s*[：:]\s*([^。．）)\n]+)", action)
         if not buy_match:
             return False
@@ -119,6 +174,11 @@ def _candidate_actions_are_inventory_based(
             if term not in action or _term_is_registered(term, stock_names):
                 continue
             if term not in buy_addition:
+                return False
+            if (
+                term in _PROTEIN_TERMS
+                and any(_term_is_registered(protein, stock_names) for protein in _PROTEIN_TERMS)
+            ):
                 return False
     return True
 
@@ -147,6 +207,18 @@ def _fallback_inventory_actions(
                 f"{name}を使う簡単な一品"
                 f"（{name}を使用。買い足し：なし。水・一般的な調味料のみ）"
             )
+        if stock_names:
+            first = stock_names[0]
+            if len(candidates) < 3:
+                candidates.append(
+                    f"{first}を使う簡単な汁物"
+                    f"（{first}を使用。買い足し：なし。水・一般的な調味料のみ）"
+                )
+            if len(candidates) < 3:
+                candidates.append(
+                    f"{first}を使う簡単なご飯もの"
+                    f"（{first}を使用。買い足し：なし。米・水・一般的な調味料のみ）"
+                )
 
     limit = 1 if low_capacity else 3
     return [
@@ -163,9 +235,32 @@ def _enforce_inventory_candidates(
     result: StructuredResponse,
     context: Mapping[str, Any],
 ) -> StructuredResponse:
-    stock_names = _stock_item_names(context)
+    registered_stock_names = _stock_item_names(context)
+    exclusion_terms = _food_exclusion_terms(context)
+    stock_names = [
+        name
+        for name in registered_stock_names
+        if not any(term in name or name in term for term in exclusion_terms)
+    ]
     low_capacity = _is_low_capacity(context)
-    if not _candidate_actions_are_inventory_based(result.suggested_actions, stock_names):
+    if not stock_names:
+        result.suggested_actions = []
+        result.message = (
+            "登録在庫には、アレルギーまたは苦手食材として確認済みのものが含まれています。"
+        )
+        result.clarification_question = "使ってよい食材を一つ教えてください。"
+        result.reasoning_tags = [
+            *[tag for tag in result.reasoning_tags if tag != "inventory_restriction_blocked"],
+            "inventory_restriction_blocked",
+        ][-8:]
+        return result
+
+    if not _candidate_actions_are_inventory_based(
+        result.suggested_actions,
+        stock_names,
+        low_capacity=low_capacity,
+        exclusion_terms=exclusion_terms,
+    ):
         result.suggested_actions = _fallback_inventory_actions(
             stock_names,
             low_capacity=low_capacity,
@@ -273,6 +368,15 @@ class FamilyOSEngine:
             "reasoning_tags are short classification labels, never chain-of-thought.",
             "memory_candidates are review candidates only and are never already saved.",
         ]
+        if _is_low_capacity(context):
+            constraints.append(
+                "The current user message explicitly signals low capacity; give one suggestion only."
+            )
+        else:
+            constraints.extend([
+                "Do not infer fatigue or low capacity from words such as '今日' or from a vague meal consultation.",
+                "For a meal proposal without explicit low-capacity language, do not narrow the response to one dish; give two or three candidates when possible.",
+            ])
         if inventory_candidates_required:
             constraints.extend([
                 "Confirmed food_stock is the highest-priority constraint for this meal consultation.",
@@ -281,6 +385,8 @@ class FamilyOSEngine:
                 "Rice, water, and ordinary seasonings may be treated as supplemental pantry items.",
                 "Every dish action must say either '買い足し：なし' or list its required additions after '買い足し：'.",
                 "Put selectable dishes only in suggested_actions; message must be a short introduction and must not list other dishes.",
+                "Treat preferences such as hearty, light, more vegetables, or no additional shopping as refinements; keep confirmed food_stock, allergies, and dislikes in force.",
+                "If a registered protein can satisfy the request, do not prioritize an unregistered meat or fish as the main ingredient.",
             ])
 
         runtime_contract = {
@@ -335,6 +441,9 @@ class FamilyOSEngine:
 
         if inventory_candidates_required:
             result = _enforce_inventory_candidates(result, context)
+
+        if _is_recipe_detail_request(user_message, additional_instructions):
+            result.suggested_actions = []
 
         self._log_result(result)
         return result
