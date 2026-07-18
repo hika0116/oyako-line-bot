@@ -9,8 +9,17 @@ from typing import Any, Iterable, Mapping
 
 _FOOD_TERMS = re.compile(
     r"(ご飯|ごはん|献立|料理|食事|食べ|レシピ|食材|在庫|冷蔵庫|冷凍庫|"
-    r"作り置き|買い物|下ごしらえ|朝食|昼食|夕食|晩ごはん|おかず|弁当|"
+    r"作り置き|買い物|下ごしらえ|朝食|昼食|夕食|夕飯|晩ごはん|晩ご飯|おかず|弁当|"
     r"調理|何作|作れる|味付け|主菜|副菜|汁物|離乳食|ミルク|辛い物)"
+)
+
+# Short messages such as "今日どうしよう" are common meal consultations in
+# the LINE flow. Keep the pattern deliberately narrow so a general "どうしよう"
+# is not misclassified and persisted as a meal conversation.
+_VAGUE_MEAL_CONSULTATION = re.compile(
+    r"^(?:今日|今夜|今晩|晩|夜)[、,\s]*(?:の)?"
+    r"(?:ご飯|ごはん|献立|夕飯|晩ご飯|晩ごはん)?(?:は|を)?"
+    r"(?:どうしよう|どうする|何にしよう|何しよう)[？?。！!]*$"
 )
 
 
@@ -25,12 +34,12 @@ def is_food_related(message: str, stocks: Iterable[str] | None = None) -> bool:
     normalized = str(message or "").strip()
     if not normalized:
         return False
-    if _FOOD_TERMS.search(normalized):
+    if _FOOD_TERMS.search(normalized) or _VAGUE_MEAL_CONSULTATION.search(normalized):
         return True
 
     for stock in stocks or []:
         item_name = re.split(r"\s|\d", str(stock or "").strip(), maxsplit=1)[0]
-        if item_name and len(item_name) >= 2 and item_name in normalized:
+        if item_name and item_name in normalized:
             return True
     return False
 

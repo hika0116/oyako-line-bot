@@ -59,8 +59,19 @@ class ContextBuilderTests(unittest.TestCase):
     def test_food_log_classifier_is_conservative_and_can_use_confirmed_stock(self):
         self.assertTrue(is_food_related("今週の献立を考えて"))
         self.assertTrue(is_food_related("卵で何作れる？", ["卵 6個"]))
+        self.assertTrue(is_food_related("今日どうしよう", ["卵 14個", "豆腐 2丁"]))
         self.assertFalse(is_food_related("夫と意見が合わない"))
         self.assertFalse(is_food_related("頭が痛くて不安"))
+        self.assertFalse(is_food_related("どうしたらいい？", ["卵 14個"]))
+
+    def test_vague_meal_consultation_receives_confirmed_stock(self):
+        context = self.builder.build(
+            "今日どうしよう",
+            food_stock=["卵 14個", "豆腐 2丁"],
+            timestamp="2026-07-19T00:00:00+00:00",
+        )
+
+        self.assertEqual(context["resources"]["food_stock"], ["卵 14個", "豆腐 2丁"])
 
 
 if __name__ == "__main__":

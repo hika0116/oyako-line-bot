@@ -137,6 +137,31 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
             "卵スープ",
         )
 
+    def test_vague_meal_consultation_passes_stock_through_normal_line_flow(self):
+        result = structured(
+            message="登録在庫から選べます。",
+            actions=[
+                SuggestedAction("1", "low", "卵焼き（卵を使用。買い足し：なし）"),
+                SuggestedAction("2", "low", "豆腐煮（豆腐を使用。買い足し：なし）"),
+            ],
+        )
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["卵 14個", "豆腐 2丁"]), \
+             patch.object(line_app, "generate_structured_reply", return_value=result) as generate, \
+             patch.object(line_app, "save_meal_log") as save:
+            reply = line_app.handle_normal_message("u1", "今日どうしよう")
+
+        context = generate.call_args.kwargs["context"]
+        self.assertEqual(context["resources"]["food_stock"], ["卵 14個", "豆腐 2丁"])
+        self.assertIn("1. 卵焼き", reply)
+        self.assertIn("2. 豆腐煮", reply)
+        save.assert_called_once()
+        self.assertEqual(
+            line_app._get_valid_meal_suggestions("u1")["candidates"]["1"],
+            "卵焼き（卵を使用。買い足し：なし）",
+        )
+
     def test_listen_or_non_numbered_response_never_updates_candidates(self):
         numeric_listen = structured(
             mode="LISTEN",
