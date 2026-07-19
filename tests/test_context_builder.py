@@ -62,6 +62,9 @@ class ContextBuilderTests(unittest.TestCase):
         self.assertTrue(is_food_related("今日どうしよう", ["卵 14個", "豆腐 2丁"]))
         self.assertTrue(is_food_related("今日どうしよ", ["卵 14個", "豆腐 2丁"]))
         self.assertTrue(is_food_related("がっつりしたものがいい", ["豚肉 300g"]))
+        self.assertTrue(is_food_related("副菜を追加して"))
+        self.assertTrue(is_food_related("汁物を追加して"))
+        self.assertTrue(is_food_related("うどんにして"))
         self.assertFalse(is_food_related("夫と意見が合わない"))
         self.assertFalse(is_food_related("頭が痛くて不安"))
         self.assertFalse(is_food_related("どうしたらいい？", ["卵 14個"]))
@@ -100,6 +103,19 @@ class ContextBuilderTests(unittest.TestCase):
                     context["current_state"]["physical_energy"] == "low"
                     or context["current_state"]["mental_energy"] == "low"
                 )
+
+    def test_future_non_stocked_seasonings_default_empty_and_accepts_profile_input(self):
+        default_context = self.builder.build("今日どうしよ")
+        configured_context = self.builder.build(
+            "今日どうしよ",
+            profile={"non_stocked_seasonings": "ごま油、にんにく"},
+        )
+
+        self.assertEqual(default_context["family_profile"]["non_stocked_seasonings"], [])
+        self.assertEqual(
+            configured_context["family_profile"]["non_stocked_seasonings"],
+            ["ごま油", "にんにく"],
+        )
 
 
 if __name__ == "__main__":

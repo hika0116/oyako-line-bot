@@ -25,8 +25,10 @@ _MEAL_CONDITION_OR_FOLLOWUP = re.compile(
     r"(ボリュームがある|がっつり|あっさり|\d+\s*人分(?:がいい|にして)|"
     r"半分の量|倍量|肉を使いたい|野菜を多め|買い足し(?:なし|を減ら)|"
     r"もっと簡単にして|電子レンジで作れる|味を薄め|子ども向け|"
-    r"汁物はいらない|副菜(?:をもっと簡単に|だけ変えて)|\d+\s*分以内にして|"
-    r"(?:ごはん|ご飯)がないから麺にして|洗い物を減らして)"
+    r"汁物(?:はいらない|を外して|を追加して|をつけて|を簡単にして)|"
+    r"副菜(?:を追加して|をつけて|をもっと簡単に|だけ変えて)|もう一品つけて|"
+    r"もっと早くして|\d+\s*分以内にして|(?:ごはん|ご飯)がないから麺にして|"
+    r"(?:うどん|パスタ|焼きそば)にして|洗い物を減らして)"
 )
 
 
@@ -136,12 +138,29 @@ def _profile_to_context(profile: Mapping[str, Any] | None) -> tuple[dict[str, An
     if _present(profile.get("tools")):
         tools.append(str(profile["tools"]).strip())
 
+    raw_non_stocked = profile.get("non_stocked_seasonings")
+    if isinstance(raw_non_stocked, str):
+        non_stocked_seasonings = [
+            item.strip()
+            for item in re.split(r"[、,・/]", raw_non_stocked)
+            if item.strip()
+        ]
+    elif isinstance(raw_non_stocked, (list, tuple)):
+        non_stocked_seasonings = [
+            str(item).strip()
+            for item in raw_non_stocked
+            if str(item).strip()
+        ]
+    else:
+        non_stocked_seasonings = []
+
     family_profile = {
         "members": members,
         "dietary_restrictions": restrictions,
         "stable_preferences": preferences,
         "tools_and_services": tools,
         "cooking_level": str(profile.get("cooking_level") or "").strip() or "unknown",
+        "non_stocked_seasonings": non_stocked_seasonings,
     }
     return family_profile, confirmed
 

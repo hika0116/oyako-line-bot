@@ -1,6 +1,13 @@
 import unittest
 
-from family_os.meal_plan import MealPlan, estimate_elapsed_minutes
+from family_os.meal_plan import (
+    MealPlan,
+    estimate_elapsed_minutes,
+    is_basic_seasoning,
+    is_pantry_ingredient,
+    normalize_shopping_additions,
+    reconcile_rice_preparation,
+)
 from family_os.schema import StructuredResponse, SuggestedAction
 
 
@@ -67,6 +74,46 @@ class MealPlanTests(unittest.TestCase):
 
         self.assertEqual(estimate_elapsed_minutes(plan), 5)
         self.assertNotIn("炊飯時間は含みません", plan.summary())
+        self.assertIn("炊いたごはん、冷凍ごはん等を使用する場合", plan.summary())
+
+    def test_new_rice_summary_requires_separate_cooking_time(self):
+        plan = complete_set_plan()
+        plan.estimated_minutes = 15
+
+        self.assertIn("炊飯時間は含みません", plan.summary())
+        self.assertIn("別途炊飯時間が必要", plan.summary())
+
+    def test_registered_ready_rice_reconciles_flags_and_reheating_time(self):
+        plan = complete_set_plan()
+        reconcile_rice_preparation(plan, ["冷凍ごはん", "豚肉"])
+
+        self.assertTrue(plan.ready_rice_used)
+        self.assertFalse(plan.rice_cooker_used)
+        self.assertEqual(plan.staple, "冷凍ごはん")
+        self.assertEqual(plan.component_minutes["staple"], 5)
+        self.assertFalse(is_pantry_ingredient("冷凍ごはん"))
+        self.assertTrue(is_pantry_ingredient("米"))
+
+    def test_basic_seasonings_are_not_shopping_by_default(self):
+        additions = normalize_shopping_additions(["ごま油", "にんにく"])
+
+        self.assertEqual(additions, [])
+        self.assertTrue(is_basic_seasoning("ごま油"))
+
+    def test_special_seasoning_remains_a_purchase_when_missing(self):
+        additions = normalize_shopping_additions(["ナンプラー", "バルサミコ酢"])
+
+        self.assertEqual(additions, ["ナンプラー", "バルサミコ酢"])
+
+    def test_future_non_stocked_setting_overrides_one_basic_seasoning(self):
+        additions = normalize_shopping_additions(
+            ["ごま油", "にんにく"],
+            non_stocked_seasonings=["ごま油"],
+        )
+
+        self.assertEqual(additions, ["ごま油"])
+        self.assertFalse(is_basic_seasoning("ごま油", ["ごま油"]))
+        self.assertTrue(is_basic_seasoning("サラダ油", ["ごま油"]))
 
     def test_cooking_level_adjustment_is_small_and_standard_is_default(self):
         plan = complete_set_plan()

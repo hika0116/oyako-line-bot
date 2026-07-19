@@ -9,6 +9,50 @@ from typing import Any, Mapping
 
 MEAL_TYPES = ("定食", "丼", "麺", "鍋", "ワンプレート", "その他")
 COMPONENT_KEYS = ("staple", "main", "soup", "side")
+READY_RICE_TERMS = (
+    "炊いたごはん",
+    "炊いたご飯",
+    "冷凍ごはん",
+    "冷凍ご飯",
+    "残りごはん",
+    "残りご飯",
+    "パックごはん",
+    "パックご飯",
+    "レトルトごはん",
+    "レトルトご飯",
+)
+PANTRY_STAPLES = ("米", "ごはん", "ご飯", "水")
+BASIC_SEASONINGS = (
+    "塩",
+    "こしょう",
+    "砂糖",
+    "しょうゆ",
+    "醤油",
+    "みそ",
+    "味噌",
+    "酢",
+    "みりん",
+    "料理酒",
+    "サラダ油",
+    "ごま油",
+    "油",
+    "マヨネーズ",
+    "ケチャップ",
+    "和風だし",
+    "だし",
+    "コンソメ",
+    "鶏がらスープの素",
+    "にんにく",
+    "しょうが",
+    "生姜",
+)
+SPECIAL_SEASONINGS = (
+    "ナンプラー",
+    "オイスターソース",
+    "コチュジャン",
+    "豆板醤",
+    "バルサミコ酢",
+)
 
 
 def _text(value: Any) -> str:
@@ -31,6 +75,120 @@ def _minutes(value: Any) -> int:
         return max(0, min(120, int(value or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def _matches_name(value: str, candidates: list[str] | tuple[str, ...]) -> bool:
+    text = _text(value)
+    for candidate in candidates:
+        if candidate == "油":
+            if text == "油" or text.startswith("油 "):
+                return True
+            continue
+        if candidate in text or text in candidate:
+            return True
+    return False
+
+
+def _contains_named_term(value: str, candidates: list[str] | tuple[str, ...]) -> bool:
+    text = _text(value)
+    return any(candidate in text for candidate in candidates)
+
+
+def is_basic_seasoning(
+    ingredient: str,
+    non_stocked_seasonings: list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    """Return whether an ingredient may use the default pantry assumption.
+
+    ``non_stocked_seasonings`` is intentionally an input instead of a database
+    dependency so a future profile field can override only selected defaults.
+    """
+
+    non_stocked = list(non_stocked_seasonings or [])
+    return (
+        not _matches_name(ingredient, SPECIAL_SEASONINGS)
+        and _matches_name(ingredient, BASIC_SEASONINGS)
+        and not _contains_named_term(
+            ingredient,
+            non_stocked,
+        )
+    )
+
+
+def is_pantry_ingredient(
+    ingredient: str,
+    non_stocked_seasonings: list[str] | tuple[str, ...] | None = None,
+) -> bool:
+    text = _text(ingredient)
+    pantry_staple = any(
+        text == item or text.startswith(item)
+        for item in PANTRY_STAPLES
+    )
+    return pantry_staple or is_basic_seasoning(
+        ingredient,
+        non_stocked_seasonings,
+    )
+
+
+def normalize_shopping_additions(
+    additions: list[str],
+    *,
+    stock_items: list[str] | tuple[str, ...] | None = None,
+    non_stocked_seasonings: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    """Remove stock and default seasonings while retaining special purchases."""
+
+    result = []
+    stock = list(stock_items or [])
+    for addition in additions:
+        text = _text(addition)
+        if not text or _matches_name(text, stock):
+            continue
+        if is_basic_seasoning(text, non_stocked_seasonings):
+            continue
+        if text not in result:
+            result.append(text)
+    return result
+
+
+def reconcile_rice_preparation(plan: "MealPlan", stock_items: list[str]) -> None:
+    """Synchronize ready-rice versus new-cooking state for display and timing."""
+
+    rice_in_plan = _contains_named_term(
+        plan.staple,
+        (*READY_RICE_TERMS, "ごはん", "ご飯", "米"),
+    )
+    if not rice_in_plan:
+        plan.rice_cooker_used = False
+        plan.ready_rice_used = False
+        return
+
+    explicit_ready = next(
+        (
+            item for item in [plan.staple, *plan.used_stock_items]
+            if _contains_named_term(item, READY_RICE_TERMS)
+        ),
+        None,
+    )
+    stocked_ready = next(
+        (item for item in stock_items if _contains_named_term(item, READY_RICE_TERMS)),
+        None,
+    )
+    ready = explicit_ready or stocked_ready
+    if ready:
+        plan.ready_rice_used = True
+        plan.rice_cooker_used = False
+        if plan.staple in {"ごはん", "ご飯", "米"}:
+            plan.staple = ready
+        if ready not in plan.ingredients:
+            plan.ingredients.append(ready)
+        if stocked_ready and ready not in plan.used_stock_items:
+            plan.used_stock_items.append(ready)
+        current_minutes = plan.component_minutes.get("staple", 0)
+        plan.component_minutes["staple"] = min(current_minutes, 5) if current_minutes else 5
+    else:
+        plan.ready_rice_used = False
+        plan.rice_cooker_used = True
 
 
 @dataclass
@@ -95,13 +253,18 @@ class MealPlan:
 
     def summary(self) -> str:
         lines = [self.title]
-        labels = (("主食", self.staple), ("主菜", self.main), ("汁物", self.soup), ("副菜", self.side))
+        if self.meal_type in {"丼", "麺", "ワンプレート"} and self.main:
+            labels = (("主食兼主菜", self.title), ("汁物", self.soup), ("副菜", self.side))
+        else:
+            labels = (("主食", self.staple), ("主菜", self.main), ("汁物", self.soup), ("副菜", self.side))
         lines.extend(f"{label}：{value}" for label, value in labels if value)
         lines.append(f"目安時間：約{self.estimated_minutes}分")
         additions = "なし" if not self.shopping_additions else "、".join(self.shopping_additions)
         lines.append(f"買い足し：{additions}")
-        if self.rice_cooker_used and self.staple and not self.ready_rice_used:
-            lines.append("※炊飯時間は含みません。")
+        if self.ready_rice_used:
+            lines.append("※炊いたごはん、冷凍ごはん等を使用する場合の時間です。")
+        elif self.rice_cooker_used and self.staple:
+            lines.append("※炊飯時間は含みません。炊いたごはんがない場合は、別途炊飯時間が必要です。")
         return "\n".join(lines)
 
 

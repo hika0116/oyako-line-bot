@@ -7,7 +7,14 @@ import logging
 import re
 from typing import Any, Mapping
 
-from .meal_plan import MealPlan, estimate_elapsed_minutes
+from .meal_plan import (
+    READY_RICE_TERMS,
+    MealPlan,
+    estimate_elapsed_minutes,
+    is_pantry_ingredient,
+    normalize_shopping_additions,
+    reconcile_rice_preparation,
+)
 from .memory import filter_memory_candidates
 from .prompt_loader import DEFAULT_DOMAIN_PROMPT_PATH, PromptDocument, load_prompt
 from .router import (
@@ -44,10 +51,8 @@ _PROTEIN_TERMS = (
     "豆腐",
     "納豆",
 )
-_READY_RICE_TERMS = ("冷凍ごはん", "冷凍ご飯", "残りごはん", "残りご飯", "パックごはん", "パックご飯", "レトルトごはん", "レトルトご飯")
 _NOODLE_TERMS = ("冷凍うどん", "うどん", "パスタ", "そうめん", "中華麺", "焼きそば麺", "ラーメン", "そば")
 _QUICK_STAPLE_TERMS = ("パン", "餅", "即席", "冷凍食品", "惣菜", "総菜")
-_PANTRY_TERMS = ("米", "ごはん", "ご飯", "水", "塩", "砂糖", "しょうゆ", "醤油", "みそ", "味噌", "酢", "油", "だし", "こしょう")
 _COMMON_MAJOR_INGREDIENTS = (*_PROTEIN_TERMS, "じゃがいも", "玉ねぎ", "たまねぎ", "白菜", "キャベツ", "ナス", "なす", "長ネギ", "ねぎ", "小松菜", "にんじん", "大根")
 
 
@@ -142,6 +147,12 @@ def _cooking_level(context: Mapping[str, Any]) -> str:
     return str(profile.get("cooking_level") or "unknown")
 
 
+def _non_stocked_seasonings(context: Mapping[str, Any]) -> list[str]:
+    profile = context.get("family_profile") or {}
+    value = profile.get("non_stocked_seasonings") or []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def _term_is_registered(term: str, stock_names: list[str]) -> bool:
     return any(term in stock_name or stock_name in term for stock_name in stock_names)
 
@@ -166,9 +177,17 @@ def _normalize_meal_actions(
     actions: list[SuggestedAction],
     context: Mapping[str, Any],
 ) -> None:
+    stock_names = _stock_item_names(context)
+    non_stocked = _non_stocked_seasonings(context)
     for action in actions:
         if not action.meal_plan:
             continue
+        reconcile_rice_preparation(action.meal_plan, stock_names)
+        action.meal_plan.shopping_additions = normalize_shopping_additions(
+            action.meal_plan.shopping_additions,
+            stock_items=stock_names,
+            non_stocked_seasonings=non_stocked,
+        )
         action.meal_plan.estimated_minutes = estimate_elapsed_minutes(
             action.meal_plan,
             _cooking_level(context),
@@ -183,6 +202,7 @@ def _meal_plan_is_valid(
     exclusion_terms: list[str],
     low_capacity: bool,
     user_message: str,
+    non_stocked_seasonings: list[str],
 ) -> bool:
     if not plan or not plan.title or plan.estimated_minutes <= 0:
         return False
@@ -214,7 +234,7 @@ def _meal_plan_is_valid(
             return False
 
     for ingredient in plan.ingredients:
-        if _matches_any(ingredient, _PANTRY_TERMS):
+        if is_pantry_ingredient(ingredient, non_stocked_seasonings):
             continue
         if _matches_any(ingredient, stock_names):
             continue
@@ -235,9 +255,9 @@ def _meal_plan_is_valid(
                 return False
 
     if low_capacity and "ごはんを炊" not in user_message and "ご飯を炊" not in user_message:
-        ready_rice = next((item for item in stock_names if _matches_any(item, _READY_RICE_TERMS)), None)
+        ready_rice = next((item for item in stock_names if _matches_any(item, READY_RICE_TERMS)), None)
         noodle = next((item for item in stock_names if _matches_any(item, _NOODLE_TERMS)), None)
-        if ready_rice and not _matches_any(plan.staple, _READY_RICE_TERMS):
+        if ready_rice and not _matches_any(plan.staple, READY_RICE_TERMS):
             return False
         if not ready_rice and noodle and not _matches_any(plan.staple, _NOODLE_TERMS):
             return False
@@ -291,7 +311,7 @@ def _low_capacity_fallback_plan(
     user_message: str,
     cooking_level: str,
 ) -> MealPlan:
-    ready_rice = next((item for item in stock_names if _matches_any(item, _READY_RICE_TERMS)), None)
+    ready_rice = next((item for item in stock_names if _matches_any(item, READY_RICE_TERMS)), None)
     noodle = next((item for item in stock_names if _matches_any(item, _NOODLE_TERMS)), None)
     quick_staple = next((item for item in stock_names if _matches_any(item, _QUICK_STAPLE_TERMS)), None)
     other = next((item for item in stock_names if item not in {ready_rice, noodle, quick_staple}), None)
@@ -472,6 +492,7 @@ def _candidate_actions_are_valid_meals(
             exclusion_terms=exclusion_terms,
             low_capacity=low_capacity,
             user_message=user_message,
+            non_stocked_seasonings=_non_stocked_seasonings(context),
         )
         for item in actions
     )
@@ -657,6 +678,9 @@ class FamilyOSEngine:
                 "estimated_minutes means table-ready elapsed time with parallel work, rounded to about five minutes; do not sum every component.",
                 "component_minutes records each component's active/elapsed contribution. Rice-cooker cooking time is excluded when rice_cooker_used is true; reheating ready rice is included.",
                 "ingredients lists all major ingredients across the entire meal; shopping_additions lists every unregistered major ingredient needed by the whole meal.",
+                "Do not put ordinary seasonings such as salt, pepper, sugar, soy sauce, miso, vinegar, mirin, cooking sake, salad oil, sesame oil, mayonnaise, ketchup, stock powder, garlic, or ginger in shopping_additions unless context explicitly lists them in non_stocked_seasonings.",
+                "Special seasonings such as fish sauce, oyster sauce, gochujang, doubanjiang, balsamic vinegar, and uncommon spices require shopping when absent; do not require one only to add a side dish when an ordinary seasoning can replace it.",
+                "For rice meals, distinguish ready/cooked/frozen/packed rice from new rice-cooker cooking. Never imply that new rice finishes within the displayed non-rice cooking time.",
                 "Initial candidate fields must not contain detailed quantities, recipes, long reasons, or step-by-step instructions.",
             ])
             if _is_low_capacity(context):

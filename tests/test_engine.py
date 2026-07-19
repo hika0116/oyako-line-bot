@@ -510,6 +510,77 @@ class EngineTests(unittest.TestCase):
             self.assertNotIn("豆腐", str(plan.to_dict()))
             self.assertIn("買い足しなし", action.action)
 
+    def test_basic_seasonings_are_removed_from_whole_meal_shopping(self):
+        plan = meal_plan_payload(
+            "豚肉と白菜の定食",
+            side="ズッキーニのナムル",
+            ingredients=["豚肉", "白菜", "ズッキーニ", "米", "ごま油", "にんにく"],
+            used_stock_items=["豚肉", "白菜", "ズッキーニ"],
+            shopping_additions=["ごま油", "にんにく"],
+        )
+        fake = FakeClient(valid_payload(
+            suggested_actions=[meal_action(1, plan), meal_action(2, plan)],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            food_stock=["豚肉 300g", "白菜 1玉", "ズッキーニ 1本"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertIn("whole_meal_policy_validated", result.reasoning_tags)
+        self.assertTrue(all(not action.meal_plan.shopping_additions for action in result.suggested_actions))
+        self.assertTrue(all("買い足しなし" in action.action for action in result.suggested_actions))
+
+    def test_missing_special_seasoning_remains_an_explicit_purchase(self):
+        plan = meal_plan_payload(
+            "豚肉と白菜の定食",
+            ingredients=["豚肉", "白菜", "米", "ナンプラー"],
+            used_stock_items=["豚肉", "白菜"],
+            shopping_additions=["ナンプラー"],
+        )
+        fake = FakeClient(valid_payload(
+            suggested_actions=[meal_action(1, plan), meal_action(2, plan)],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            food_stock=["豚肉 300g", "白菜 1玉"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertIn("whole_meal_policy_validated", result.reasoning_tags)
+        self.assertTrue(all(action.meal_plan.shopping_additions == ["ナンプラー"] for action in result.suggested_actions))
+        runtime_contract = json.loads(fake.responses.calls[0]["input"][2]["content"])
+        self.assertTrue(any(
+            "do not require one only to add a side dish" in constraint
+            for constraint in runtime_contract["constraints"]
+        ))
+
+    def test_future_non_stocked_seasoning_profile_can_require_basic_seasoning(self):
+        plan = meal_plan_payload(
+            "豚肉と白菜の定食",
+            ingredients=["豚肉", "白菜", "米", "ごま油"],
+            used_stock_items=["豚肉", "白菜"],
+            shopping_additions=["ごま油"],
+        )
+        fake = FakeClient(valid_payload(
+            suggested_actions=[meal_action(1, plan), meal_action(2, plan)],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            profile={"non_stocked_seasonings": ["ごま油"]},
+            food_stock=["豚肉 300g", "白菜 1玉"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertEqual(context["family_profile"]["non_stocked_seasonings"], ["ごま油"])
+        self.assertTrue(all(action.meal_plan.shopping_additions == ["ごま油"] for action in result.suggested_actions))
+
     def test_high_burden_low_capacity_candidate_is_replaced(self):
         heavy = meal_plan_payload(
             "豚肉とじゃがいもの炒め煮定食",
