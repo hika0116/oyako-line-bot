@@ -97,7 +97,9 @@ def route_response_mode(
     if re.search(
         r"(\d+\s*人分にして|半分の量にして|倍量にして|もっと簡単にして|"
         r"電子レンジで作れる|味を薄めにして|子ども向けにして|"
-        r"この料理に合う副菜|買い足しを減らして)",
+        r"この料理に合う副菜|買い足しを減らして|汁物はいらない|"
+        r"副菜をもっと簡単に|副菜だけ変えて|\d+\s*分以内にして|"
+        r"(?:ごはん|ご飯)がないから麺にして|洗い物を減らして)",
         text,
     ):
         return ResponseMode.ACT
@@ -118,6 +120,10 @@ def route_response_mode(
         return ResponseMode.ACT
 
     if re.search(r"(正解[？?]|どっち|どちら|案|選択肢|どうしよう)", text):
+        return ResponseMode.PROPOSE
+
+    request = context.get("request") or {}
+    if request.get("is_food_related") and re.search(r"(にしたい|食べたい|作りたい)", text):
         return ResponseMode.PROPOSE
 
     # "辛い物" means spicy food and must not be treated as emotional distress.

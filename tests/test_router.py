@@ -51,6 +51,16 @@ class RouterTests(unittest.TestCase):
         safety = detect_safety(message, context)
         self.assertEqual(route_response_mode(message, context, safety), ResponseMode.ACT)
 
+    def test_explicit_low_capacity_meal_preference_routes_to_propose(self):
+        message = "疲れたけど、ごはんを炊いて丼にしたい"
+        context = self.builder.build(message)
+        safety = detect_safety(message, context)
+
+        self.assertEqual(
+            route_response_mode(message, context, safety),
+            ResponseMode.PROPOSE,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

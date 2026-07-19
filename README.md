@@ -6,7 +6,7 @@ Book 0 v1.1 / Book 7 v1.0 の共通AI基盤を、既存の「おやこ時間ご�
 
 通常会話は `ContextBuilder → Safety preflight → Response Mode Router → Structured Output → Memory Candidate filter → LINE表示` の順で処理します。System Promptは `prompts/Family_OS_Work_Handoff_System_Prompt_v1.0.md` から読み込み、バージョンとSHA-256を応答ログへ記録します。
 
-`StructuredResponse.suggested_actions` はLINEで失われないよう、`message` の後へ短い自然文として表示します。料理選択用の `1`〜`3` は、構造化出力と実際のLINE表示の両方に連番候補がある場合だけ有効になります。
+`StructuredResponse.suggested_actions` はLINEで失われないよう、`message` の後へ表示します。料理候補には構造化された `meal_plan` を持たせ、初回は献立タイトル・一食完成時間・買い足し有無だけを表示します。料理選択用の `1`〜`3` は、構造化出力と実際のLINE表示の両方に連番候補がある場合だけ有効になります。
 
 ## 保存ポリシー
 
@@ -16,7 +16,7 @@ Book 0 v1.1 / Book 7 v1.0 の共通AI基盤を、既存の「おやこ時間ご�
 
 ## プロセスメモリの制約
 
-`setup_sessions`、`last_suggestions`、`last_recipes` はプロセスメモリです。`last_recipes` は、選択した料理名、直前に表示したレシピ、表示時刻、判定できる場合の人数をユーザー単位で保持します。
+`setup_sessions`、`last_suggestions`、`last_recipes` はプロセスメモリです。`last_recipes` は、選択した一食の構成、直前に表示したレシピ、表示時刻、判定できる場合の人数をユーザー単位で保持します。
 
 - 再起動やデプロイで消えます。
 - 複数Gunicornワーカー間では共有されません。

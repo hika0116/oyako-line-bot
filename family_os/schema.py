@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
+from .meal_plan import MEAL_PLAN_SCHEMA, MealPlan
 from .router import ResponseMode, SafetyLevel
 
 
@@ -13,6 +14,11 @@ class SuggestedAction:
     label: str
     effort: str
     action: str
+    meal_plan: MealPlan | None = None
+
+    def __post_init__(self) -> None:
+        if self.meal_plan and self.meal_plan.title:
+            self.action = self.meal_plan.compact_action()
 
 
 @dataclass
@@ -66,6 +72,7 @@ class StructuredResponse:
                 label=str(item.get("label") or "小さな一歩"),
                 effort=effort,
                 action=str(item.get("action") or ""),
+                meal_plan=MealPlan.from_mapping(item.get("meal_plan")),
             ))
         if low_capacity:
             actions = actions[:1]
@@ -162,8 +169,9 @@ STRUCTURED_OUTPUT_SCHEMA: dict[str, Any] = {
                     "label": {"type": "string"},
                     "effort": {"type": "string", "enum": ["minimum", "low", "medium"]},
                     "action": {"type": "string"},
+                    "meal_plan": MEAL_PLAN_SCHEMA,
                 },
-                "required": ["label", "effort", "action"],
+                "required": ["label", "effort", "action", "meal_plan"],
                 "additionalProperties": False,
             },
         },

@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import app as line_app
+from family_os.meal_plan import MealPlan, estimate_elapsed_minutes
 from family_os.schema import StructuredResponse, SuggestedAction
 
 
@@ -28,6 +29,29 @@ def structured(
         suggested_actions=actions or [],
         prompt_version="1.0",
     )
+
+
+def whole_meal_plan(**overrides):
+    values = {
+        "title": "豚肉と白菜の重ね蒸し定食",
+        "meal_type": "定食",
+        "staple": "ごはん",
+        "main": "豚肉と白菜の重ね蒸し",
+        "soup": "白菜のみそ汁",
+        "side": "冷ややっこ",
+        "shopping_additions": [],
+        "low_capacity": False,
+        "servings": 2,
+        "ingredients": ["豚肉", "白菜", "豆腐", "米"],
+        "used_stock_items": ["豚肉", "白菜", "豆腐"],
+        "component_minutes": {"staple": 45, "main": 20, "soup": 10, "side": 3},
+        "rice_cooker_used": True,
+        "ready_rice_used": False,
+    }
+    values.update(overrides)
+    plan = MealPlan(**values)
+    plan.estimated_minutes = estimate_elapsed_minutes(plan)
+    return plan
 
 
 class LineSignatureTests(unittest.TestCase):
@@ -105,6 +129,18 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
             patch.object(line_app, "generate_structured_reply", return_value=result),
             patch.object(line_app, "save_meal_log"),
         )
+
+    def _store_whole_meal(self, user_id="u1"):
+        plan = whole_meal_plan()
+        line_app._set_last_recipe(
+            user_id,
+            selected_dish=plan.title,
+            candidate_text=plan.compact_action(),
+            recipe_text=f"{plan.summary()}\n\n1. みそ汁の湯を沸かす",
+            servings=2,
+            meal_plan=plan,
+        )
+        return plan
 
     def test_non_food_conversation_is_not_saved_to_meal_logs(self):
         result = structured(mode="LISTEN", message="それはしんどかったですね。")
@@ -346,6 +382,111 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
 
         self.assertNotIn("u1", line_app.last_recipes)
         self.assertIsNotNone(line_app._get_valid_meal_suggestions("u1"))
+
+    def test_whole_meal_selection_shows_components_and_parallel_workflow(self):
+        selected = whole_meal_plan()
+        other = whole_meal_plan(title="鶏肉の別定食", main="鶏肉の蒸し物")
+        proposal = structured(
+            message="候補です。",
+            actions=[
+                SuggestedAction("1", "low", "", meal_plan=selected),
+                SuggestedAction("2", "low", "", meal_plan=other),
+            ],
+        )
+        detail = structured(
+            mode="ACT",
+            message=(
+                "材料：豚肉300g、白菜1/4玉、豆腐1/2丁\n"
+                "同時調理：1. みそ汁の湯を沸かす 2. その間に主菜を加熱する "
+                "3. 加熱中に冷ややっこを盛る"
+            ),
+        )
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉", "豆腐 1丁"]), \
+             patch.object(line_app, "generate_structured_reply", side_effect=[proposal, detail]), \
+             patch.object(line_app, "save_meal_log"):
+            initial = line_app.handle_normal_message("u1", "今日どうしよ")
+            reply = line_app.handle_recipe_selection("u1", "1", "1")
+
+        self.assertIn("約25分｜買い足しなし", initial)
+        self.assertNotIn("豚肉300g", initial)
+        self.assertIn("主食：ごはん", reply)
+        self.assertIn("主菜：豚肉と白菜の重ね蒸し", reply)
+        self.assertIn("汁物：白菜のみそ汁", reply)
+        self.assertIn("副菜：冷ややっこ", reply)
+        self.assertIn("同時調理", reply)
+        self.assertIn("※炊飯時間は含みません。", reply)
+        self.assertNotIn("鶏肉の別定食", reply)
+        self.assertEqual(line_app.last_recipes["u1"]["meal_plan"]["title"], selected.title)
+
+    def test_whole_meal_followup_removes_only_soup_without_new_candidates(self):
+        self._store_whole_meal()
+        adjusted = structured(
+            mode="ACT",
+            message="主食・主菜・副菜はそのままで、汁物を外しました。",
+            actions=[SuggestedAction("1", "low", "別の献立")],
+        )
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉", "豆腐 1丁"]), \
+             patch.object(line_app, "generate_structured_reply", return_value=adjusted), \
+             patch.object(line_app, "save_meal_log"):
+            reply = line_app.handle_normal_message("u1", "汁物はいらない")
+
+        state_plan = line_app.last_recipes["u1"]["meal_plan"]
+        self.assertEqual(state_plan["soup"], "")
+        self.assertIn("主菜：豚肉と白菜の重ね蒸し", reply)
+        self.assertIn("副菜：冷ややっこ", reply)
+        self.assertNotIn("汁物：", reply)
+        self.assertNotIn("別の献立", reply)
+        self.assertNotIn("u1", line_app.last_suggestions)
+
+    def test_whole_meal_followup_applies_twenty_minute_limit(self):
+        self._store_whole_meal()
+        adjusted = structured(mode="ACT", message="20分以内で終わる順番に調整しました。")
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉", "豆腐 1丁"]), \
+             patch.object(line_app, "generate_structured_reply", return_value=adjusted), \
+             patch.object(line_app, "save_meal_log"):
+            reply = line_app.handle_normal_message("u1", "20分以内にして")
+
+        self.assertIn("目安時間：約20分", reply)
+        self.assertEqual(line_app.last_recipes["u1"]["meal_plan"]["estimated_minutes"], 20)
+
+    def test_whole_meal_followup_changes_only_staple_to_stocked_noodles(self):
+        self._store_whole_meal()
+        adjusted = structured(mode="ACT", message="主菜を活かして麺中心に組み替えました。")
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉", "冷凍うどん 2玉"]), \
+             patch.object(line_app, "generate_structured_reply", return_value=adjusted), \
+             patch.object(line_app, "save_meal_log"):
+            reply = line_app.handle_normal_message("u1", "ごはんがないから麺にして")
+
+        state_plan = line_app.last_recipes["u1"]["meal_plan"]
+        self.assertEqual(state_plan["meal_type"], "麺")
+        self.assertEqual(state_plan["staple"], "冷凍うどん")
+        self.assertIn("主食：冷凍うどん", reply)
+        self.assertIn("主菜：豚肉と白菜の重ね蒸し", reply)
+
+    def test_whole_meal_followup_adjusts_all_components_to_one_serving(self):
+        self._store_whole_meal()
+        adjusted = structured(
+            mode="ACT",
+            message="1人分：豚肉150g、白菜1/8玉、豆腐1/4丁に調整しました。",
+        )
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_recent_logs", return_value=[]), \
+             patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉", "豆腐 1丁"]), \
+             patch.object(line_app, "generate_structured_reply", return_value=adjusted), \
+             patch.object(line_app, "save_meal_log"):
+            reply = line_app.handle_normal_message("u1", "1人分にして")
+
+        self.assertIn("1人分", reply)
+        self.assertEqual(line_app.last_recipes["u1"]["meal_plan"]["servings"], 1)
+        self.assertNotIn("u1", line_app.last_suggestions)
 
 
 class ExistingFeatureRegressionTests(unittest.TestCase):

@@ -1,8 +1,14 @@
 import unittest
 
 from family_os.memory import filter_memory_candidates, save_memory_candidates
+from family_os.meal_plan import MealPlan
 from family_os.router import ResponseMode, SafetyLevel
-from family_os.schema import MemoryCandidate, StructuredResponse, SuggestedAction
+from family_os.schema import (
+    STRUCTURED_OUTPUT_SCHEMA,
+    MemoryCandidate,
+    StructuredResponse,
+    SuggestedAction,
+)
 
 
 class SchemaAndMemoryTests(unittest.TestCase):
@@ -75,6 +81,40 @@ class SchemaAndMemoryTests(unittest.TestCase):
             suggested_actions=[SuggestedAction("最小案", "minimum", "惣菜を使う")],
         )
         self.assertIn("今できること：最小案：惣菜を使う", response.user_message())
+
+    def test_structured_schema_and_parser_keep_whole_meal_data(self):
+        action_schema = STRUCTURED_OUTPUT_SCHEMA["properties"]["suggested_actions"]["items"]
+        self.assertIn("meal_plan", action_schema["required"])
+
+        plan = MealPlan(
+            title="親子丼セット",
+            meal_type="丼",
+            staple="ごはん",
+            main="親子丼",
+            soup="豆腐のみそ汁",
+            estimated_minutes=20,
+            ingredients=["鶏肉", "卵", "米", "豆腐"],
+            used_stock_items=["鶏肉", "卵", "豆腐"],
+            component_minutes={"staple": 45, "main": 15, "soup": 10, "side": 0},
+            rice_cooker_used=True,
+        )
+        parsed = StructuredResponse.from_dict(
+            {
+                "message": "候補です。",
+                "suggested_actions": [{
+                    "label": "1",
+                    "effort": "low",
+                    "action": "model value",
+                    "meal_plan": plan.to_dict(),
+                }],
+            },
+            forced_mode=ResponseMode.PROPOSE,
+            minimum_safety=SafetyLevel.NONE,
+            prompt_version="1.0",
+        )
+
+        self.assertEqual(parsed.suggested_actions[0].meal_plan.title, "親子丼セット")
+        self.assertEqual(parsed.suggested_actions[0].action, plan.compact_action())
 
 
 if __name__ == "__main__":

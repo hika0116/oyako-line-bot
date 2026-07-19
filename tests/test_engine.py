@@ -38,6 +38,55 @@ def valid_payload(**overrides):
     return payload
 
 
+def meal_plan_payload(
+    title,
+    *,
+    meal_type="定食",
+    staple="ごはん",
+    main="豚肉と白菜の重ね蒸し",
+    soup="白菜のみそ汁",
+    side="",
+    ingredients=None,
+    used_stock_items=None,
+    shopping_additions=None,
+    low_capacity=False,
+    component_minutes=None,
+    rice_cooker_used=True,
+    ready_rice_used=False,
+):
+    return {
+        "title": title,
+        "meal_type": meal_type,
+        "staple": staple,
+        "main": main,
+        "soup": soup,
+        "side": side,
+        "estimated_minutes": 20,
+        "shopping_additions": shopping_additions or [],
+        "low_capacity": low_capacity,
+        "servings": None,
+        "ingredients": ingredients or ["豚肉", "白菜", "米"],
+        "used_stock_items": used_stock_items or ["豚肉", "白菜"],
+        "component_minutes": component_minutes or {
+            "staple": 45,
+            "main": 20,
+            "soup": 10,
+            "side": 0,
+        },
+        "rice_cooker_used": rice_cooker_used,
+        "ready_rice_used": ready_rice_used,
+    }
+
+
+def meal_action(label, plan):
+    return {
+        "label": str(label),
+        "effort": "minimum" if plan["low_capacity"] else "low",
+        "action": plan["title"],
+        "meal_plan": plan,
+    }
+
+
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.builder = ContextBuilder()
@@ -127,7 +176,7 @@ class EngineTests(unittest.TestCase):
             self.assertTrue("卵" in action.action or "豆腐" in action.action)
             self.assertIn("買い足し", action.action)
             self.assertIn(f"{action.label}. {action.action}", result.user_message())
-        self.assertIn("inventory_policy_validated", result.reasoning_tags)
+        self.assertIn("whole_meal_policy_fallback", result.reasoning_tags)
 
         runtime_contract = json.loads(fake.responses.calls[0]["input"][2]["content"])
         self.assertEqual(
@@ -165,7 +214,7 @@ class EngineTests(unittest.TestCase):
         rendered = result.user_message()
 
         self.assertEqual(len(result.suggested_actions), 3)
-        self.assertIn("inventory_policy_fallback", result.reasoning_tags)
+        self.assertIn("whole_meal_policy_fallback", result.reasoning_tags)
         for action in result.suggested_actions:
             self.assertTrue("卵" in action.action or "豆腐" in action.action)
         self.assertNotIn("冷凍餃子", rendered)
@@ -188,7 +237,9 @@ class EngineTests(unittest.TestCase):
 
         result = engine.respond(context)
 
-        self.assertIn("冷凍餃子", result.user_message())
+        self.assertEqual(len(result.suggested_actions), 3)
+        self.assertTrue(all(action.meal_plan for action in result.suggested_actions))
+        self.assertTrue(all(action.meal_plan.shopping_additions for action in result.suggested_actions))
         self.assertNotIn("inventory_policy_fallback", result.reasoning_tags)
 
     def test_vague_consultation_is_not_narrowed_to_one_inventory_candidate(self):
@@ -305,6 +356,185 @@ class EngineTests(unittest.TestCase):
 
         self.assertNotIn("牛肉", result.user_message())
         self.assertTrue(all("豚肉" in action.action for action in result.suggested_actions))
+
+    def test_valid_whole_meals_keep_compact_initial_display_and_no_shopping(self):
+        plans = [
+            meal_plan_payload("豚肉と白菜の重ね蒸し定食", side="白菜の浅漬け"),
+            meal_plan_payload(
+                "豚肉丼セット",
+                meal_type="丼",
+                main="豚肉丼",
+                soup="白菜のみそ汁",
+            ),
+            meal_plan_payload(
+                "豚肉と白菜のワンプレート",
+                meal_type="ワンプレート",
+                main="豚肉と白菜の一皿",
+                soup="",
+            ),
+        ]
+        fake = FakeClient(valid_payload(
+            message="長い材料説明は表示しない候補です。",
+            suggested_actions=[meal_action(index, plan) for index, plan in enumerate(plans, 1)],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            food_stock=["豚肉 300g", "白菜 1玉"],
+        )
+
+        result = engine.respond(context)
+        rendered = result.user_message()
+
+        self.assertEqual(len(result.suggested_actions), 3)
+        self.assertIn("whole_meal_policy_validated", result.reasoning_tags)
+        self.assertNotIn("300g", rendered)
+        self.assertNotIn("作り方", rendered)
+        for action in result.suggested_actions:
+            self.assertIsNotNone(action.meal_plan)
+            self.assertIn("約", action.action)
+            self.assertIn("買い足しなし", action.action)
+
+    def test_low_capacity_ready_rice_prefers_one_low_burden_bowl(self):
+        fake = FakeClient(valid_payload())
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日は疲れた。ごはんどうしよう",
+            food_stock=["冷凍ごはん 2食", "豚肉 200g"],
+        )
+
+        result = engine.respond(context)
+        plan = result.suggested_actions[0].meal_plan
+
+        self.assertEqual(len(result.suggested_actions), 1)
+        self.assertEqual(plan.meal_type, "丼")
+        self.assertIn("冷凍ごはん", plan.staple)
+        self.assertTrue(plan.ready_rice_used)
+        self.assertLessEqual(plan.estimated_minutes, 20)
+        self.assertLessEqual(sum(bool(x) for x in (plan.staple, plan.main, plan.soup, plan.side)), 2)
+
+    def test_low_capacity_without_ready_rice_prefers_stocked_noodles(self):
+        fake = FakeClient(valid_payload())
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日は無理。とにかく簡単に食べたい",
+            food_stock=["冷凍うどん 2玉", "白菜 1/4玉"],
+        )
+
+        result = engine.respond(context)
+        plan = result.suggested_actions[0].meal_plan
+
+        self.assertEqual(plan.meal_type, "麺")
+        self.assertIn("冷凍うどん", plan.staple)
+        self.assertLessEqual(plan.estimated_minutes, 20)
+
+    def test_low_capacity_without_ready_staple_does_not_assume_cooking_rice(self):
+        fake = FakeClient(valid_payload())
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日は疲れた。何もしたくない。ごはんどうしよう",
+            food_stock=["豚肉 200g", "白菜 1/4玉"],
+        )
+
+        result = engine.respond(context)
+        plan = result.suggested_actions[0].meal_plan
+
+        self.assertFalse(plan.rice_cooker_used)
+        self.assertNotEqual(plan.staple, "ごはん")
+        self.assertLessEqual(plan.estimated_minutes, 20)
+
+    def test_explicit_request_to_cook_rice_overrides_low_capacity_staple_priority(self):
+        fake = FakeClient(valid_payload())
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "疲れたけど、ごはんを炊いて丼にしたい",
+            food_stock=["冷凍うどん 2玉", "豚肉 200g"],
+        )
+
+        result = engine.respond(context)
+        plan = result.suggested_actions[0].meal_plan
+
+        self.assertEqual(plan.staple, "ごはん")
+        self.assertTrue(plan.rice_cooker_used)
+        self.assertIn("※炊飯時間は含みません。", plan.summary())
+
+    def test_allergy_in_soup_invalidates_the_entire_meal_candidate(self):
+        unsafe = meal_plan_payload(
+            "豚肉と白菜の定食",
+            soup="卵スープ",
+            ingredients=["豚肉", "白菜", "卵", "米"],
+            used_stock_items=["豚肉", "白菜", "卵"],
+        )
+        safe = meal_plan_payload("豚肉と白菜の丼", meal_type="丼", soup="")
+        fake = FakeClient(valid_payload(
+            suggested_actions=[meal_action(1, unsafe), meal_action(2, safe)],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            profile={"allergies": "卵アレルギー"},
+            food_stock=["豚肉 300g", "白菜 1玉", "卵 4個"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertNotIn("卵", result.user_message())
+        self.assertTrue(all("卵" not in str(action.meal_plan.to_dict()) for action in result.suggested_actions))
+
+    def test_no_shopping_claim_is_rejected_when_whole_meal_needs_unregistered_food(self):
+        inconsistent = meal_plan_payload(
+            "豚肉と白菜の定食",
+            soup="豆腐のみそ汁",
+            ingredients=["豚肉", "白菜", "豆腐", "米"],
+            used_stock_items=["豚肉", "白菜"],
+            shopping_additions=[],
+        )
+        fake = FakeClient(valid_payload(
+            suggested_actions=[
+                meal_action(1, inconsistent),
+                meal_action(2, inconsistent),
+            ],
+        ))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日どうしよ",
+            food_stock=["豚肉 300g", "白菜 1玉"],
+        )
+
+        result = engine.respond(context)
+
+        self.assertIn("whole_meal_policy_fallback", result.reasoning_tags)
+        for action in result.suggested_actions:
+            plan = action.meal_plan
+            self.assertIsNotNone(plan)
+            self.assertNotIn("豆腐", str(plan.to_dict()))
+            self.assertIn("買い足しなし", action.action)
+
+    def test_high_burden_low_capacity_candidate_is_replaced(self):
+        heavy = meal_plan_payload(
+            "豚肉とじゃがいもの炒め煮定食",
+            main="豚肉とじゃがいもの炒め煮",
+            soup="白菜のみそ汁",
+            side="じゃがいもの副菜",
+            ingredients=["豚肉", "じゃがいも", "白菜", "米"],
+            used_stock_items=["豚肉", "じゃがいも", "白菜"],
+            low_capacity=True,
+            component_minutes={"staple": 45, "main": 35, "soup": 10, "side": 10},
+        )
+        fake = FakeClient(valid_payload(suggested_actions=[meal_action(1, heavy)]))
+        engine = FamilyOSEngine(client=fake)
+        context = self.builder.build(
+            "今日は疲れた。ごはんどうしよう",
+            food_stock=["豚肉 300g", "じゃがいも 4個", "白菜 1玉"],
+        )
+
+        result = engine.respond(context)
+        plan = result.suggested_actions[0].meal_plan
+
+        self.assertEqual(len(result.suggested_actions), 1)
+        self.assertLessEqual(plan.estimated_minutes, 20)
+        self.assertNotEqual(plan.meal_type, "定食")
+        self.assertNotIn("炒め煮", plan.title)
 
 
 if __name__ == "__main__":

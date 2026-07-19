@@ -24,7 +24,9 @@ _VAGUE_MEAL_CONSULTATION = re.compile(
 _MEAL_CONDITION_OR_FOLLOWUP = re.compile(
     r"(ボリュームがある|がっつり|あっさり|\d+\s*人分(?:がいい|にして)|"
     r"半分の量|倍量|肉を使いたい|野菜を多め|買い足し(?:なし|を減ら)|"
-    r"もっと簡単にして|電子レンジで作れる|味を薄め|子ども向け)"
+    r"もっと簡単にして|電子レンジで作れる|味を薄め|子ども向け|"
+    r"汁物はいらない|副菜(?:をもっと簡単に|だけ変えて)|\d+\s*分以内にして|"
+    r"(?:ごはん|ご飯)がないから麺にして|洗い物を減らして)"
 )
 
 
@@ -139,6 +141,7 @@ def _profile_to_context(profile: Mapping[str, Any] | None) -> tuple[dict[str, An
         "dietary_restrictions": restrictions,
         "stable_preferences": preferences,
         "tools_and_services": tools,
+        "cooking_level": str(profile.get("cooking_level") or "").strip() or "unknown",
     }
     return family_profile, confirmed
 
@@ -216,6 +219,7 @@ class ContextBuilder:
                 "user_message": user_message,
                 "channel": channel if channel in {"line", "app", "web"} else "app",
                 "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+                "is_food_related": food_related,
             },
             "family_profile": family_profile,
             "current_state": state,
