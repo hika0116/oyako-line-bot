@@ -120,6 +120,8 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
     def setUp(self):
         line_app.last_suggestions.clear()
         line_app.last_recipes.clear()
+        line_app.pending_meal_requests.clear()
+        line_app.recent_recipe_history.clear()
 
     def _normal_patches(self, result):
         return (
@@ -162,6 +164,17 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         )
         return plan
 
+    def _store_proposal(self, result, user_id="u1", meal_occasion="dinner"):
+        rendered = result.user_message()
+        line_app._set_meal_suggestions(
+            user_id,
+            result,
+            rendered,
+            food_related=True,
+            meal_occasion=meal_occasion,
+        )
+        return rendered
+
     def test_non_food_conversation_is_not_saved_to_meal_logs(self):
         result = structured(mode="LISTEN", message="それはしんどかったですね。")
         patches = self._normal_patches(result)
@@ -179,20 +192,16 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         save.assert_not_called()
 
     def test_food_conversation_is_saved_and_real_candidates_become_valid(self):
-        actions = [
-            SuggestedAction("1", "low", "卵とじ丼"),
-            SuggestedAction("2", "low", "卵スープ"),
-        ]
-        result = structured(message="卵を使うなら、この2つです。", actions=actions)
-        patches = self._normal_patches(result)
-        with patches[0], patches[1], patches[2], patches[3], patches[4] as save:
-            reply = line_app.handle_normal_message("u1", "卵で何作れる？")
+        with patch.object(line_app, "get_profile", return_value={}), \
+             patch.object(line_app, "get_stocks", return_value=["卵 4個"]), \
+             patch.object(line_app, "generate_structured_reply") as generate, \
+             patch.object(line_app, "save_meal_log") as save:
+            reply = line_app.handle_normal_message("u1", "卵で朝ごはん何作れる？")
         save.assert_called_once()
-        self.assertIn("1. 卵とじ丼", reply)
-        self.assertEqual(
-            line_app._get_valid_meal_suggestions("u1")["candidates"]["2"],
-            "卵スープ",
-        )
+        generate.assert_not_called()
+        self.assertIn("1. ", reply)
+        self.assertIn("卵", reply)
+        self.assertTrue(line_app._get_valid_meal_suggestions("u1")["candidates"])
 
     def test_vague_meal_consultation_passes_stock_through_normal_line_flow(self):
         result = structured(
@@ -209,15 +218,12 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
              patch.object(line_app, "save_meal_log") as save:
             reply = line_app.handle_normal_message("u1", "今日どうしよう")
 
-        context = generate.call_args.kwargs["context"]
-        self.assertEqual(context["resources"]["food_stock"], ["卵 14個", "豆腐 2丁"])
-        self.assertIn("1. 卵焼き", reply)
-        self.assertIn("2. 豆腐煮", reply)
+        generate.assert_not_called()
+        self.assertIn("どのごはん", reply)
+        self.assertNotIn("約", reply)
         save.assert_called_once()
-        self.assertEqual(
-            line_app._get_valid_meal_suggestions("u1")["candidates"]["1"],
-            "卵焼き（卵を使用。買い足し：なし）",
-        )
+        self.assertIsNone(line_app._get_valid_meal_suggestions("u1"))
+        self.assertTrue(line_app._get_valid_pending_meal_request("u1"))
 
     def test_listen_or_non_numbered_response_never_updates_candidates(self):
         numeric_listen = structured(
@@ -280,14 +286,14 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         with patch.object(line_app, "get_profile", return_value={}), \
              patch.object(line_app, "get_recent_logs", return_value=[]), \
              patch.object(line_app, "get_stocks", return_value=["卵 4個"]), \
-             patch.object(line_app, "generate_structured_reply", side_effect=[proposal, recipe]), \
+             patch.object(line_app, "generate_structured_reply", return_value=recipe), \
              patch.object(line_app, "save_meal_log") as save:
-            line_app.handle_normal_message("u1", "今日のご飯を考えて")
+            self._store_proposal(proposal)
             detail = line_app.handle_recipe_selection("u1", "1", "1")
         self.assertIn("卵2個", detail)
         self.assertNotIn("u1", line_app.last_suggestions)
         self.assertEqual(line_app.last_recipes["u1"]["selected_dish"], "親子丼")
-        self.assertEqual(save.call_count, 2)
+        self.assertEqual(save.call_count, 1)
         self.assertEqual(save.call_args.kwargs["selected_menu"], "親子丼")
 
     def test_selected_recipe_followup_keeps_dish_and_adjusts_servings(self):
@@ -328,10 +334,10 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
              patch.object(
                  line_app,
                  "generate_structured_reply",
-                 side_effect=[proposal, recipe, adjusted],
+                 side_effect=[recipe, adjusted],
              ) as generate, \
              patch.object(line_app, "save_meal_log") as save:
-            line_app.handle_normal_message("u1", "今日どうしよ")
+            self._store_proposal(proposal)
             line_app.handle_recipe_selection("u1", "1", "1")
             reply = line_app.handle_normal_message("u1", "今日は1人分にして")
 
@@ -341,8 +347,8 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         self.assertNotIn("納豆ごはん", reply)
         self.assertNotIn("u1", line_app.last_suggestions)
         self.assertEqual(line_app.last_recipes["u1"]["servings"], 1)
-        self.assertEqual(save.call_count, 3)
-        followup_instructions = generate.call_args_list[2].kwargs["additional_instructions"]
+        self.assertEqual(save.call_count, 2)
+        followup_instructions = generate.call_args_list[1].kwargs["additional_instructions"]
         self.assertIn("直前に表示した料理", followup_instructions)
         self.assertIn("豚肉300g", followup_instructions)
         self.assertIn("新しい番号選択候補は提示しない", followup_instructions)
@@ -401,7 +407,8 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
             line_app.handle_normal_message("u1", "今日どうしよ")
 
         self.assertNotIn("u1", line_app.last_recipes)
-        self.assertIsNotNone(line_app._get_valid_meal_suggestions("u1"))
+        self.assertIsNone(line_app._get_valid_meal_suggestions("u1"))
+        self.assertIsNotNone(line_app._get_valid_pending_meal_request("u1"))
 
     def test_whole_meal_selection_shows_components_and_parallel_workflow(self):
         selected = whole_meal_plan()
@@ -424,9 +431,9 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         with patch.object(line_app, "get_profile", return_value={}), \
              patch.object(line_app, "get_recent_logs", return_value=[]), \
              patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉", "豆腐 1丁"]), \
-             patch.object(line_app, "generate_structured_reply", side_effect=[proposal, detail]), \
+             patch.object(line_app, "generate_structured_reply", return_value=detail), \
              patch.object(line_app, "save_meal_log"):
-            initial = line_app.handle_normal_message("u1", "今日どうしよ")
+            initial = self._store_proposal(proposal)
             reply = line_app.handle_recipe_selection("u1", "1", "1")
 
         self.assertIn("約25分｜買い足しなし", initial)
@@ -458,9 +465,9 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         with patch.object(line_app, "get_profile", return_value={}), \
              patch.object(line_app, "get_recent_logs", return_value=[]), \
              patch.object(line_app, "get_stocks", return_value=["豚肉 300g", "白菜 1玉"]), \
-             patch.object(line_app, "generate_structured_reply", side_effect=[proposal, detail]), \
+             patch.object(line_app, "generate_structured_reply", return_value=detail), \
              patch.object(line_app, "save_meal_log"):
-            line_app.handle_normal_message("u1", "今日どうしよ")
+            self._store_proposal(proposal)
             reply = line_app.handle_recipe_selection("u1", "1", "1")
 
         self.assertIn("別途炊飯時間が必要", reply)
@@ -490,9 +497,9 @@ class MealLogAndSuggestionStateTests(unittest.TestCase):
         with patch.object(line_app, "get_profile", return_value={}), \
              patch.object(line_app, "get_recent_logs", return_value=[]), \
              patch.object(line_app, "get_stocks", return_value=["冷凍ごはん 1食", "豚肉 100g", "卵 1個"]), \
-             patch.object(line_app, "generate_structured_reply", side_effect=[proposal, detail]), \
+             patch.object(line_app, "generate_structured_reply", return_value=detail), \
              patch.object(line_app, "save_meal_log"):
-            line_app.handle_normal_message("u1", "今日どうしよ")
+            self._store_proposal(proposal)
             reply = line_app.handle_recipe_selection("u1", "1", "1")
 
         state = line_app.last_recipes["u1"]["meal_plan"]

@@ -19,6 +19,25 @@ from family_os.meal_plan import (
     normalize_shopping_additions,
     reconcile_rice_preparation,
 )
+from family_os.meal_occasion import (
+    detect_meal_occasion,
+    meal_occasion_prompt,
+    merge_pending_conditions,
+    pending_conditions,
+)
+from family_os.recipe_catalog import (
+    Recipe,
+    RecipeCatalog,
+    compose_meal_plans,
+    ingredient_matches_stock,
+    plan_recipe_ids,
+    recipe_uses_any_stock,
+    refresh_plan_from_components,
+    render_recipe_detail,
+    stock_item_names,
+    validate_plan_components,
+)
+from family_os.schema import SuggestedAction
 
 
 logging.basicConfig(
@@ -34,6 +53,8 @@ app = Flask(__name__)
 last_suggestions: dict[str, dict] = {}
 last_recipes: dict[str, dict] = {}
 setup_sessions: dict[str, dict] = {}
+pending_meal_requests: dict[str, dict] = {}
+recent_recipe_history: dict[str, list[dict]] = {}
 
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET")
@@ -126,6 +147,7 @@ _NEW_MEAL_CONSULTATION = re.compile(
 def _clear_meal_conversation_state(user_id: str) -> None:
     last_suggestions.pop(user_id, None)
     last_recipes.pop(user_id, None)
+    pending_meal_requests.pop(user_id, None)
 
 
 def _dish_name_from_candidate(candidate: str) -> str:
@@ -162,6 +184,7 @@ def _set_last_recipe(
     meal_plan: MealPlan | None = None,
 ) -> None:
     displayed_at = time.time()
+    pending_meal_requests.pop(user_id, None)
     last_recipes[user_id] = {
         "selected_dish": selected_dish,
         "candidate_text": candidate_text,
@@ -275,6 +298,211 @@ def _safe_stock_names(stocks: list[str], profile: dict | None) -> list[str]:
         for name in [_stock_item_name(item) for item in stocks]
         if name and not any(term in name or name in term for term in exclusions)
     ]
+
+
+def get_recipe_catalog() -> RecipeCatalog:
+    """Load published DB recipes, falling back to the reviewed local seed.
+
+    The fallback keeps development and pre-migration environments functional;
+    it is the same structured format and never invokes AI to invent a recipe.
+    """
+
+    if supabase is not None:
+        try:
+            catalog = RecipeCatalog.from_supabase(supabase)
+            if catalog.published():
+                return catalog
+        except Exception as exc:
+            logger.warning(
+                "Recipe catalog query unavailable; using reviewed seed error_type=%s",
+                type(exc).__name__,
+            )
+    return RecipeCatalog.from_json()
+
+
+def _set_pending_meal_request(user_id: str, message: str) -> None:
+    now = time.time()
+    current = _get_valid_pending_meal_request(user_id)
+    pending_meal_requests[user_id] = {
+        "conditions": merge_pending_conditions(
+            (current or {}).get("conditions"),
+            message,
+        ),
+        "created_at": now,
+        "expires_at": now + MEAL_SUGGESTION_TTL_SECONDS,
+    }
+
+
+def _get_valid_pending_meal_request(user_id: str) -> dict | None:
+    state = pending_meal_requests.get(user_id)
+    if not isinstance(state, dict) or state.get("expires_at", 0) <= time.time():
+        pending_meal_requests.pop(user_id, None)
+        return None
+    return state
+
+
+def _active_meal_occasion(user_id: str) -> str | None:
+    suggestions = _get_valid_meal_suggestions(user_id)
+    if suggestions and suggestions.get("meal_occasion"):
+        return str(suggestions["meal_occasion"])
+    recipe = _get_valid_last_recipe(user_id)
+    if recipe:
+        plan = MealPlan.from_mapping(recipe.get("meal_plan"))
+        if plan and plan.meal_occasion:
+            return plan.meal_occasion
+    return None
+
+
+def _recent_recipe_history(user_id: str) -> list[dict]:
+    history = list(recent_recipe_history.get(user_id) or [])[-30:]
+    if supabase is None:
+        return history
+    try:
+        result = (
+            supabase.table("recipe_proposal_history")
+            .select("recipe_id,meal_occasion,proposed_at,selected_at,selected,servings")
+            .eq("user_id", user_id)
+            .order("proposed_at", desc=True)
+            .limit(30)
+            .execute()
+        )
+        return list(getattr(result, "data", None) or []) + history
+    except Exception as exc:
+        logger.warning(
+            "Recipe history query unavailable error_type=%s",
+            type(exc).__name__,
+        )
+        return history
+
+
+def _record_recipe_history(
+    user_id: str,
+    plans: list[MealPlan],
+    *,
+    selected: bool = False,
+) -> None:
+    now = time.time()
+    rows = []
+    for plan in plans:
+        for recipe_id in plan_recipe_ids(plan):
+            row = {
+                "user_id": user_id,
+                "recipe_id": recipe_id,
+                "meal_occasion": plan.meal_occasion or "dinner",
+                "proposed_at": now,
+                "selected_at": now if selected else None,
+                "selected": selected,
+                "servings": plan.servings,
+            }
+            recent_recipe_history.setdefault(user_id, []).append(row)
+            rows.append(row)
+    recent_recipe_history[user_id] = recent_recipe_history.get(user_id, [])[-60:]
+    if supabase is None or not rows:
+        return
+    try:
+        database_rows = [
+            {
+                **row,
+                "proposed_at": datetime_from_timestamp(row["proposed_at"]),
+                "selected_at": datetime_from_timestamp(row["selected_at"]) if row["selected_at"] else None,
+            }
+            for row in rows
+        ]
+        supabase.table("recipe_proposal_history").insert(database_rows).execute()
+    except Exception as exc:
+        logger.warning(
+            "Recipe history write unavailable error_type=%s",
+            type(exc).__name__,
+        )
+
+
+def datetime_from_timestamp(value: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(value))
+
+
+def _is_catalog_meal_request(message: str, stocks: list[str]) -> bool:
+    normalized = unicodedata.normalize("NFKC", str(message or "")).strip()
+    return bool(
+        is_food_related(normalized, stocks)
+        and re.search(
+            r"(どうしよ|どうする|何作|作れる|献立|食べたい|作りたい|"
+            r"朝食|朝ごはん|昼食|ランチ|弁当|夕食|夕飯|晩ごはん|"
+            r"夜ごはん|つまみ|がっつり|あっさり|ボリューム)",
+            normalized,
+        )
+    )
+
+
+def _catalog_meal_reply(
+    user_id: str,
+    user_message: str,
+    meal_occasion: str,
+    *,
+    conditions: dict | None = None,
+) -> str:
+    profile = get_profile(user_id)
+    stocks = get_stocks(user_id)
+    conditions = merge_pending_conditions(conditions, user_message)
+    plans = compose_meal_plans(
+        get_recipe_catalog(),
+        meal_occasion=meal_occasion,
+        stocks=stocks,
+        exclusions=_profile_food_exclusions(profile),
+        low_capacity=bool(conditions.get("low_capacity")),
+        cooking_level=str((profile or {}).get("cooking_level") or "unknown"),
+        max_minutes=conditions.get("max_minutes"),
+        recent_history=_recent_recipe_history(user_id),
+        non_stocked_seasonings=_profile_list(profile, "non_stocked_seasonings"),
+        preference_terms=conditions.get("preferences") or [],
+        limit=1 if conditions.get("low_capacity") else 3,
+    )
+    pending_meal_requests.pop(user_id, None)
+    last_recipes.pop(user_id, None)
+    if not plans:
+        last_suggestions.pop(user_id, None)
+        reply = (
+            "条件に合う登録レシピがまだありません。\n"
+            "時間や食材の条件を少し変えて探しますか？"
+        )
+        save_meal_log(user_id, user_message, reply)
+        return reply
+
+    if conditions.get("servings"):
+        for plan in plans:
+            plan.servings = int(conditions["servings"])
+
+    message = (
+        "登録在庫を優先すると、この候補です。"
+        if stocks
+        else "登録レシピから、この候補です。"
+    )
+    result = StructuredResponse(
+        response_mode="PROPOSE",
+        safety_level="none",
+        message=message,
+        suggested_actions=[
+            SuggestedAction(
+                label=str(index),
+                effort="minimum" if conditions.get("low_capacity") else "low",
+                action="",
+                meal_plan=plan,
+            )
+            for index, plan in enumerate(plans, start=1)
+        ],
+        reasoning_tags=["recipe_catalog", f"meal_occasion:{meal_occasion}"],
+        prompt_version="catalog-v1.0",
+    )
+    rendered = result.user_message()
+    _set_meal_suggestions(
+        user_id,
+        result,
+        rendered,
+        food_related=True,
+        meal_occasion=meal_occasion,
+    )
+    _record_recipe_history(user_id, plans)
+    save_meal_log(user_id, user_message, rendered)
+    return rendered
 
 
 def _remove_component_materials(plan: MealPlan, component: str) -> None:
@@ -620,6 +848,171 @@ def _updated_meal_plan_for_followup(
     return updated
 
 
+def _catalog_recipe_allowed(recipe: Recipe, profile: dict | None) -> bool:
+    text = " ".join([
+        recipe.title,
+        *(item.ingredient_name for item in recipe.ingredients),
+    ])
+    return not any(term in text for term in _profile_food_exclusions(profile))
+
+
+def _choose_catalog_component(
+    catalog: RecipeCatalog,
+    *,
+    role: str,
+    meal_occasion: str,
+    stocks: list[str],
+    profile: dict | None,
+    exclude_ids: set[str],
+) -> Recipe | None:
+    candidates = [
+        recipe for recipe in catalog.published(meal_occasion)
+        if role in recipe.dish_roles
+        and recipe.id not in exclude_ids
+        and _catalog_recipe_allowed(recipe, profile)
+        and (not stocks or recipe_uses_any_stock(recipe, stocks))
+    ]
+    return min(candidates, key=lambda item: (item.total_minutes, item.title), default=None)
+
+
+def _catalog_noodle_plan(
+    plan: MealPlan,
+    message: str,
+    *,
+    catalog: RecipeCatalog,
+    stocks: list[str],
+    profile: dict | None,
+    cooking_level: str,
+) -> MealPlan | None:
+    normalized = unicodedata.normalize("NFKC", message)
+    if "パスタ" in normalized:
+        requested = "パスタ"
+    elif "焼きそば" in normalized:
+        requested = "焼き"
+    elif "うどん" in normalized or "麺にして" in normalized:
+        requested = "うどん"
+    else:
+        requested = ""
+    previous_stock = stock_item_names(plan.used_stock_items)
+    candidates = [
+        recipe for recipe in catalog.published(plan.meal_occasion or "dinner")
+        if ("staple_and_main" in recipe.dish_roles or "one_dish" in recipe.dish_roles)
+        and ("麺" in recipe.tags or re.search(r"(うどん|パスタ|焼きそば|そば|麺)", recipe.title))
+        and (not requested or requested in recipe.title)
+        and _catalog_recipe_allowed(recipe, profile)
+    ]
+    if not candidates and requested == "うどん":
+        candidates = [
+            recipe for recipe in catalog.published(plan.meal_occasion or "dinner")
+            if "うどん" in recipe.title and _catalog_recipe_allowed(recipe, profile)
+        ]
+    if not candidates:
+        return None
+
+    stock_names = stock_item_names(stocks)
+
+    def rank(recipe: Recipe) -> tuple[int, int, int, str]:
+        noodle_in_stock = any(
+            ingredient_matches_stock(item.normalized_name, stock_names)
+            for item in recipe.ingredients
+            if re.search(r"(うどん|パスタ|そば|麺)", item.normalized_name)
+        )
+        retained = sum(
+            ingredient_matches_stock(item.normalized_name, previous_stock)
+            for item in recipe.ingredients
+        )
+        return (not noodle_in_stock, -retained, recipe.total_minutes, recipe.title)
+
+    chosen = min(candidates, key=rank)
+    rebuilt = compose_meal_plans(
+        RecipeCatalog([chosen]),
+        meal_occasion=plan.meal_occasion or "dinner",
+        stocks=stocks,
+        exclusions=_profile_food_exclusions(profile),
+        cooking_level=cooking_level,
+        non_stocked_seasonings=_profile_list(profile, "non_stocked_seasonings"),
+        limit=1,
+    )
+    if not rebuilt:
+        return None
+    rebuilt[0].servings = plan.servings
+    return rebuilt[0]
+
+
+def _updated_catalog_plan_for_followup(
+    plan: MealPlan,
+    message: str,
+    *,
+    stocks: list[str],
+    profile: dict | None,
+    cooking_level: str,
+) -> MealPlan | None:
+    updated = MealPlan.from_mapping(plan.to_dict())
+    if not updated or not updated.recipe_components:
+        return None
+    normalized = unicodedata.normalize("NFKC", message)
+    catalog = get_recipe_catalog()
+    if re.search(
+        r"(?:ごはん|ご飯)がないから麺にして|(?:うどん|パスタ|焼きそば)にして",
+        normalized,
+    ):
+        return _catalog_noodle_plan(
+            updated,
+            normalized,
+            catalog=catalog,
+            stocks=stocks,
+            profile=profile,
+            cooking_level=cooking_level,
+        )
+
+    if "汁物はいらない" in normalized or "汁物を外して" in normalized:
+        updated.soup = ""
+        updated.recipe_ids.pop("soup", None)
+        updated.recipe_components.pop("soup", None)
+
+    add_side = bool(re.search(r"副菜を(?:追加して|つけて)|もう一品つけて", normalized))
+    replace_side = bool(re.search(r"副菜をもっと簡単に|副菜だけ変えて", normalized))
+    add_soup = bool(re.search(r"汁物を(?:追加して|つけて)", normalized))
+    replace_soup = "汁物を簡単にして" in normalized
+    if add_side or replace_side:
+        recipe = _choose_catalog_component(
+            catalog,
+            role="side",
+            meal_occasion=updated.meal_occasion or "dinner",
+            stocks=stocks,
+            profile=profile,
+            exclude_ids=set(updated.recipe_ids.values()),
+        )
+        if recipe:
+            updated.side = recipe.title
+            updated.recipe_ids["side"] = recipe.id
+            updated.recipe_components["side"] = recipe.to_component()
+    if add_soup or replace_soup:
+        recipe = _choose_catalog_component(
+            catalog,
+            role="soup",
+            meal_occasion=updated.meal_occasion or "dinner",
+            stocks=stocks,
+            profile=profile,
+            exclude_ids=set(updated.recipe_ids.values()),
+        )
+        if recipe:
+            updated.soup = recipe.title
+            updated.recipe_ids["soup"] = recipe.id
+            updated.recipe_components["soup"] = recipe.to_component()
+
+    servings = _servings_from_text(normalized)
+    if servings is not None:
+        updated.servings = servings
+    refresh_plan_from_components(
+        updated,
+        stocks=stocks,
+        cooking_level=cooking_level,
+        non_stocked_seasonings=_profile_list(profile, "non_stocked_seasonings"),
+    )
+    return updated if validate_plan_components(updated) else None
+
+
 def verify_line_signature(raw_body: bytes, signature: str | None) -> bool:
     """Verify LINE's HMAC-SHA256 signature before processing an event."""
 
@@ -661,8 +1054,10 @@ def _set_meal_suggestions(
     rendered_text: str,
     *,
     food_related: bool,
+    meal_occasion: str | None = None,
 ) -> None:
     last_suggestions.pop(user_id, None)
+    pending_meal_requests.pop(user_id, None)
     if not food_related:
         return
     candidates = _meal_candidates_from_response(result, rendered_text)
@@ -679,6 +1074,7 @@ def _set_meal_suggestions(
                 result.suggested_actions,
             )
         },
+        "meal_occasion": meal_occasion,
         "expires_at": time.time() + MEAL_SUGGESTION_TTL_SECONDS,
     }
 
@@ -745,6 +1141,9 @@ def webhook():
             elif normalized_message in ["在庫", "在庫確認"]:
                 _clear_meal_conversation_state(user_id)
                 ai_text = handle_stock_list(user_id)
+
+            elif normalized_message in ["1", "2", "3", "4", "5"] and _get_valid_pending_meal_request(user_id):
+                ai_text = handle_normal_message(user_id, normalized_message)
 
             elif normalized_message in ["1", "2", "3"]:
                 state = _get_valid_meal_suggestions(user_id)
@@ -1082,7 +1481,12 @@ def handle_recipe_selection(user_id, normalized_message, original_message):
     selected_plan = MealPlan.from_mapping(
         (state.get("meal_plans") or {}).get(normalized_message)
     )
-    if selected_plan:
+    catalog_plan = bool(
+        selected_plan
+        and selected_plan.recipe_components
+        and validate_plan_components(selected_plan)
+    )
+    if selected_plan and not catalog_plan:
         stock_names = _safe_stock_names(stocks, profile)
         reconcile_rice_preparation(selected_plan, stock_names)
         selected_plan.shopping_additions = normalize_shopping_additions(
@@ -1095,6 +1499,20 @@ def handle_recipe_selection(user_id, normalized_message, original_message):
             str((profile or {}).get("cooking_level") or "unknown"),
         )
     selected_dish = selected_plan.title if selected_plan else _dish_name_from_candidate(selected_candidate)
+    if selected_plan and catalog_plan:
+        ai_text = render_recipe_detail(selected_plan, selected_plan.servings)
+        _set_last_recipe(
+            user_id,
+            selected_dish=selected_dish,
+            candidate_text=selected_candidate,
+            recipe_text=ai_text,
+            servings=selected_plan.servings,
+            meal_plan=selected_plan,
+        )
+        _record_recipe_history(user_id, [selected_plan], selected=True)
+        save_meal_log(user_id, original_message, ai_text, selected_menu=selected_dish)
+        return ai_text
+
     context = context_builder.build(
         f"前回の料理候補から{normalized_message}番を選びました。詳しい作り方を教えて。",
         channel="line",
@@ -1154,6 +1572,40 @@ def handle_recipe_followup(user_id, user_message):
     recent_logs = get_recent_logs(user_id)
     stocks = get_stocks(user_id)
     previous_plan = MealPlan.from_mapping(state.get("meal_plan"))
+    catalog_plan = bool(
+        previous_plan
+        and previous_plan.recipe_components
+        and validate_plan_components(previous_plan)
+    )
+    if catalog_plan and previous_plan:
+        updated_catalog_plan = _updated_catalog_plan_for_followup(
+            previous_plan,
+            user_message,
+            stocks=stocks,
+            profile=profile,
+            cooking_level=str((profile or {}).get("cooking_level") or "unknown"),
+        )
+        if not updated_catalog_plan:
+            return (
+                "その変更に合う登録レシピがまだありません。\n"
+                "別の条件を一つだけ教えてください。"
+            )
+        selected_dish = updated_catalog_plan.title
+        ai_text = render_recipe_detail(
+            updated_catalog_plan,
+            updated_catalog_plan.servings,
+        )
+        _set_last_recipe(
+            user_id,
+            selected_dish=selected_dish,
+            candidate_text=updated_catalog_plan.compact_action(),
+            recipe_text=ai_text,
+            servings=updated_catalog_plan.servings,
+            meal_plan=updated_catalog_plan,
+        )
+        save_meal_log(user_id, user_message, ai_text, selected_menu=selected_dish)
+        return ai_text
+
     updated_plan = _updated_meal_plan_for_followup(
         previous_plan,
         user_message,
@@ -1219,6 +1671,22 @@ def handle_recipe_followup(user_id, user_message):
 
 
 def handle_normal_message(user_id, user_message):
+    pending = _get_valid_pending_meal_request(user_id)
+    if pending:
+        occasion = detect_meal_occasion(user_message, allow_number=True)
+        if occasion:
+            return _catalog_meal_reply(
+                user_id,
+                user_message,
+                occasion,
+                conditions=pending.get("conditions"),
+            )
+        pending_stocks = get_stocks(user_id)
+        if is_food_related(user_message, pending_stocks):
+            _set_pending_meal_request(user_id, user_message)
+            return meal_occasion_prompt()
+        pending_meal_requests.pop(user_id, None)
+
     if _is_recipe_followup_request(user_message):
         return handle_recipe_followup(user_id, user_message)
 
@@ -1226,6 +1694,29 @@ def handle_normal_message(user_id, user_message):
     stocks = get_stocks(user_id)
     food_related = is_food_related(user_message, stocks)
     normalized_message = unicodedata.normalize("NFKC", user_message).strip()
+    if _is_catalog_meal_request(normalized_message, stocks):
+        explicit_occasion = detect_meal_occasion(normalized_message)
+        active_occasion = _active_meal_occasion(user_id)
+        condition_only = bool(re.search(
+            r"(がっつり|ボリューム|あっさり|野菜を多め|肉を使いたい|"
+            r"買い足しなし|\d+\s*分以内)",
+            normalized_message,
+        ))
+        occasion = explicit_occasion or (active_occasion if condition_only else None)
+        if not occasion:
+            last_suggestions.pop(user_id, None)
+            last_recipes.pop(user_id, None)
+            _set_pending_meal_request(user_id, normalized_message)
+            reply = meal_occasion_prompt()
+            save_meal_log(user_id, user_message, reply)
+            return reply
+        return _catalog_meal_reply(
+            user_id,
+            user_message,
+            occasion,
+            conditions=pending_conditions(normalized_message),
+        )
+
     if food_related and _NEW_MEAL_CONSULTATION.search(normalized_message):
         last_recipes.pop(user_id, None)
     recent_logs = get_recent_logs(user_id) if food_related else []

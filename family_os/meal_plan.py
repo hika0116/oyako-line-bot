@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 MEAL_TYPES = ("定食", "丼", "麺", "鍋", "ワンプレート", "その他")
 COMPONENT_KEYS = ("staple", "main", "soup", "side")
+RECIPE_COMPONENT_KEYS = ("staple", "main", "soup", "side", "one_dish")
 READY_RICE_TERMS = (
     "炊いたごはん",
     "炊いたご飯",
@@ -208,6 +209,10 @@ class MealPlan:
     component_minutes: dict[str, int] = field(default_factory=dict)
     rice_cooker_used: bool = False
     ready_rice_used: bool = False
+    meal_occasion: str = ""
+    recipe_ids: dict[str, str] = field(default_factory=dict)
+    recipe_components: dict[str, dict[str, Any]] = field(default_factory=dict)
+    source_references: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any] | None) -> "MealPlan | None":
@@ -242,6 +247,22 @@ class MealPlan:
             component_minutes=components,
             rice_cooker_used=bool(value.get("rice_cooker_used")),
             ready_rice_used=bool(value.get("ready_rice_used")),
+            meal_occasion=_text(value.get("meal_occasion")),
+            recipe_ids={
+                str(key): _text(item)
+                for key, item in dict(value.get("recipe_ids") or {}).items()
+                if key in RECIPE_COMPONENT_KEYS and _text(item)
+            } if isinstance(value.get("recipe_ids"), Mapping) else {},
+            recipe_components={
+                str(key): dict(item)
+                for key, item in dict(value.get("recipe_components") or {}).items()
+                if key in RECIPE_COMPONENT_KEYS and isinstance(item, Mapping)
+            } if isinstance(value.get("recipe_components"), Mapping) else {},
+            source_references=[
+                {str(key): _text(item) for key, item in source.items()}
+                for source in list(value.get("source_references") or [])[:10]
+                if isinstance(source, Mapping)
+            ],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -347,6 +368,46 @@ MEAL_PLAN_SCHEMA: dict[str, Any] = {
                 },
                 "rice_cooker_used": {"type": "boolean"},
                 "ready_rice_used": {"type": "boolean"},
+                "meal_occasion": {
+                    "type": "string",
+                    "enum": ["", "breakfast", "lunch", "bento", "dinner", "otsumami"],
+                },
+                "recipe_ids": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+                "recipe_components": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+                "source_references": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "component": {"type": "string"},
+                            "source_name": {"type": "string"},
+                            "source_url": {"type": "string"},
+                            "source_type": {"type": "string"},
+                            "license_or_usage_note": {"type": "string"},
+                            "checked_at": {"type": "string"},
+                            "source_role": {"type": "string"},
+                        },
+                        "required": [
+                            "component",
+                            "source_name",
+                            "source_url",
+                            "source_type",
+                            "license_or_usage_note",
+                            "checked_at",
+                            "source_role",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
             },
             "required": [
                 "title",
@@ -364,6 +425,10 @@ MEAL_PLAN_SCHEMA: dict[str, Any] = {
                 "component_minutes",
                 "rice_cooker_used",
                 "ready_rice_used",
+                "meal_occasion",
+                "recipe_ids",
+                "recipe_components",
+                "source_references",
             ],
             "additionalProperties": False,
         },

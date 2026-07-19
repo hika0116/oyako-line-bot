@@ -1,6 +1,6 @@
 # Minimum Working Family OS v1.0 統合テスト状況
 
-- 実行日: 2026-07-18
+- 実行日: 2026-07-19
 - 統合元: `eba344afbef2eb5087fa616de7d2763f1983fcbc`
 - 対象モデル設定: `gpt-4.1-mini`
 
@@ -8,7 +8,7 @@
 
 | テスト | 結果 | 証跡 |
 |---|---:|---|
-| Python単体・統合・回帰 | PASS | 36/36 |
+| Python単体・統合・回帰 | PASS | 125/125 |
 | 添付12件のオフライン行動テスト | PASS | 12/12、`behavior_test_results.json` |
 | `must` / `must_not` / 選択権 / 情報量 | PASS | 全12ケース |
 | 不正LINE署名の400拒否 | PASS | Flask Webhook統合テスト |
@@ -17,7 +17,12 @@
 | 非食事相談を`meal_logs`へ保存しない | PASS | モックSupabase統合テスト |
 | 食事相談だけを`meal_logs`へ保存 | PASS | モックSupabase統合テスト |
 | 候補なしの`1`を料理選択にしない | PASS | Webhook統合テスト |
-| 献立候補→番号選択→詳細レシピ | PASS | モックOpenAI/Supabase統合テスト |
+| 食事区分確認→候補→番号選択→DB詳細 | PASS | 決定的処理・モックSupabase統合テスト |
+| 食事区分確認・番号選択・人数変更のAI不使用 | PASS | OpenAIモック呼び出し0回 |
+| publishedレシピ検索・在庫・アレルギー・弁当制約 | PASS | カタログ単体・統合テスト |
+| recipe_id・見出し・材料・工程・参考元の同期 | PASS | カタログ整合性テスト |
+| 提案履歴による重複抑制 | PASS | 直近提案ペナルティ単体テスト |
+| 月次収集テーマのdry-run | PASS | DB書き込み・外部検索なし |
 | 初期設定フロー | PASS | 回帰テスト |
 | 在庫登録・追加・使用・確認 | PASS | 回帰テスト |
 | Gunicorn本番設定ロード | PASS | `gunicorn --check-config app:app` |
@@ -44,6 +49,15 @@
 | 外部HTTPからの不正署名拒否 | BLOCKED | 開発用デプロイ先とChannel Secretが必要 |
 
 ローカル代替試験の成功を、上記の実環境試験完了とは扱わない。本番マージ前に `docs/PRODUCTION_INTEGRATION.md` の手順で実施する。
+
+## レシピDB移行状態
+
+- マイグレーションSQL: `supabase/migrations/202607190001_recipe_catalog.sql`
+- 開発用seed: `data/recipes_seed_v1.json`（23件、すべて内部作成）
+- 外部Supabaseへのマイグレーション適用: 未実施
+- 外部Supabaseへのseed投入: 未実施
+- 外部レシピ検索・スクレイピング: 未実施
+- 新しい秘密情報・環境変数: なし
 
 ## 秘密情報の事前監査
 

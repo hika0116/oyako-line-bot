@@ -10,7 +10,8 @@ from typing import Any, Iterable, Mapping
 _FOOD_TERMS = re.compile(
     r"(ご飯|ごはん|献立|料理|食事|食べ|レシピ|食材|在庫|冷蔵庫|冷凍庫|"
     r"作り置き|買い物|下ごしらえ|朝食|昼食|夕食|夕飯|晩ごはん|晩ご飯|おかず|弁当|"
-    r"調理|何作|作れる|味付け|主菜|副菜|汁物|離乳食|ミルク|辛い物)"
+    r"調理|何作|作れる|味付け|主菜|副菜|汁物|離乳食|ミルク|辛い物|"
+    r"おつまみ|つまみ|ビールに合う)"
 )
 
 # Short messages such as "今日どうしよう" are common meal consultations in
