@@ -544,6 +544,27 @@ def _elapsed(recipes: Sequence[Recipe], cooking_level: str | None) -> int:
     return max(5, int(math.ceil(base / 5) * 5))
 
 
+def _uses_rice_cooker(recipe: Recipe) -> bool:
+    return (
+        "staple" in recipe.dish_roles
+        and "米" in {item.normalized_name for item in recipe.ingredients}
+        and "炊く" in recipe.cooking_method
+    )
+
+
+def _elapsed_for_components(
+    components: Mapping[str, Recipe], cooking_level: str | None
+) -> int:
+    """Exclude passive rice-cooker time from the displayed meal duration."""
+
+    timed_recipes = [
+        recipe
+        for role, recipe in components.items()
+        if not (role == "staple" and _uses_rice_cooker(recipe))
+    ]
+    return _elapsed(timed_recipes, cooking_level)
+
+
 def compose_meal_plans(
     catalog: RecipeCatalog,
     *,
@@ -704,7 +725,7 @@ def compose_meal_plans(
             main=primary.title if role in {"main", "one_dish", "staple_and_main"} else "",
             soup=components["soup"].title if "soup" in components else "",
             side=components["side"].title if "side" in components else "",
-            estimated_minutes=_elapsed(component_recipes, cooking_level),
+            estimated_minutes=_elapsed_for_components(components, cooking_level),
             shopping_additions=additions,
             low_capacity=low_capacity,
             servings=servings,
@@ -717,8 +738,7 @@ def compose_meal_plans(
                 "side": components.get("side").total_minutes if components.get("side") else 0,
             },
             rice_cooker_used=bool(
-                "staple" in components
-                and "米" in [item.normalized_name for item in components["staple"].ingredients]
+                "staple" in components and _uses_rice_cooker(components["staple"])
             ),
             ready_rice_used=bool(
                 "staple" in components
@@ -864,7 +884,7 @@ def refresh_plan_from_components(
         "soup": recipes_by_role["soup"].total_minutes if "soup" in recipes_by_role else 0,
         "side": recipes_by_role["side"].total_minutes if "side" in recipes_by_role else 0,
     }
-    plan.estimated_minutes = _elapsed(recipes, cooking_level)
+    plan.estimated_minutes = _elapsed_for_components(recipes_by_role, cooking_level)
     plan.source_references = [
         {"component": role, **asdict(source)}
         for role, recipe in recipes_by_role.items()

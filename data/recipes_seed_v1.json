@@ -10,7 +10,7 @@
       "dish_roles": ["staple"],
       "meal_occasions": ["breakfast", "lunch", "bento", "dinner"],
       "cuisine": "和食", "cooking_method": ["炊く"],
-      "total_minutes": 5, "active_minutes": 5, "difficulty": "easy",
+      "total_minutes": 50, "active_minutes": 5, "difficulty": "easy",
       "low_energy": false, "bento_suitable": true, "leak_risk": "low",
       "make_ahead_possible": true, "season_months": [], "tags": ["ごはん"],
       "content_status": "published", "source_type": "internal",
@@ -19,7 +19,7 @@
         {"ingredient_name": "水", "normalized_name": "水", "quantity": 200, "unit": "ml", "scaling_mode": "linear", "rounding_increment": 10, "basic_seasoning": true, "sort_order": 2}
       ],
       "steps": [
-        {"step_number": 1, "instruction": "米を研ぎ、炊飯器の目盛りまで水を入れて炊飯を開始する。", "duration_minutes": 5, "equipment": ["炊飯器"], "parallel_group": "rice", "depends_on_steps": [], "can_parallelize": true}
+        {"step_number": 1, "instruction": "米を研ぎ、炊飯器の目盛りまで水を入れて炊飯を開始し、標準的な炊飯で炊き上がりまで約45〜60分待つ。", "duration_minutes": 50, "equipment": ["炊飯器"], "parallel_group": "rice", "depends_on_steps": [], "can_parallelize": true}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
@@ -123,7 +123,7 @@
       ],
       "steps": [
         {"step_number": 1, "instruction": "鶏肉とじゃがいもを食べやすく切り、じゃがいもを電子レンジで下加熱する。", "duration_minutes": 8, "equipment": ["包丁", "まな板", "電子レンジ"], "parallel_group": "main", "depends_on_steps": [], "can_parallelize": false},
-        {"step_number": 2, "instruction": "フライパンで鶏肉とじゃがいもを焼き、しょうゆとみりんを絡めて汁気を飛ばす。", "duration_minutes": 12, "equipment": ["フライパン"], "parallel_group": "main", "depends_on_steps": [1], "can_parallelize": false}
+        {"step_number": 2, "instruction": "フライパンにサラダ油を入れて鶏肉とじゃがいもを焼き、しょうゆとみりんを絡めて汁気を飛ばす。", "duration_minutes": 12, "equipment": ["フライパン"], "parallel_group": "main", "depends_on_steps": [1], "can_parallelize": false}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
@@ -141,11 +141,12 @@
         {"ingredient_name": "豆腐", "normalized_name": "豆腐", "quantity": 1, "unit": "丁", "scaling_mode": "count", "rounding_increment": 0.5, "minimum_quantity": 0.5, "sort_order": 2},
         {"ingredient_name": "卵", "normalized_name": "卵", "quantity": 2, "unit": "個", "scaling_mode": "count", "rounding_increment": 1, "minimum_quantity": 1, "sort_order": 3},
         {"ingredient_name": "しょうゆ", "normalized_name": "しょうゆ", "quantity": 1, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 4},
-        {"ingredient_name": "片栗粉", "normalized_name": "片栗粉", "quantity": 1, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 5}
+        {"ingredient_name": "片栗粉", "normalized_name": "片栗粉", "quantity": 2, "unit": "小さじ", "scaling_mode": "linear", "rounding_increment": 0.5, "basic_seasoning": true, "sort_order": 5},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 250, "unit": "ml", "scaling_mode": "linear", "rounding_increment": 10, "basic_seasoning": true, "sort_order": 6}
       ],
       "steps": [
-        {"step_number": 1, "instruction": "鍋で豆腐としょうゆ、水を温め、溶き卵を加えて火を通す。", "duration_minutes": 8, "equipment": ["鍋"], "parallel_group": "don", "depends_on_steps": [], "can_parallelize": false},
-        {"step_number": 2, "instruction": "水溶き片栗粉を加えてとろみを付け、温めたごはんにかける。", "duration_minutes": 7, "equipment": ["鍋", "電子レンジ"], "parallel_group": "don", "depends_on_steps": [1], "can_parallelize": false}
+        {"step_number": 1, "instruction": "鍋で豆腐、しょうゆ、水220mlを温め、溶き卵を加えて火を通す。", "duration_minutes": 8, "equipment": ["鍋"], "parallel_group": "don", "depends_on_steps": [], "can_parallelize": false},
+        {"step_number": 2, "instruction": "片栗粉を残りの水30mlで溶いて加え、とろみを付けて温めたごはんにかける。", "duration_minutes": 7, "equipment": ["鍋", "電子レンジ"], "parallel_group": "don", "depends_on_steps": [1], "can_parallelize": false}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
@@ -164,11 +165,12 @@
         {"ingredient_name": "豚肉", "normalized_name": "豚肉", "quantity": 160, "unit": "g", "scaling_mode": "linear", "rounding_increment": 10, "sort_order": 2},
         {"ingredient_name": "白菜", "normalized_name": "白菜", "quantity": 200, "unit": "g", "scaling_mode": "linear", "rounding_increment": 10, "sort_order": 3},
         {"ingredient_name": "しょうゆ", "normalized_name": "しょうゆ", "quantity": 1.5, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 4},
-        {"ingredient_name": "片栗粉", "normalized_name": "片栗粉", "quantity": 2, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 5}
+        {"ingredient_name": "片栗粉", "normalized_name": "片栗粉", "quantity": 1, "unit": "大さじ", "scaling_mode": "linear", "rounding_increment": 0.5, "basic_seasoning": true, "sort_order": 5},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 400, "unit": "ml", "scaling_mode": "linear", "rounding_increment": 10, "basic_seasoning": true, "sort_order": 6}
       ],
       "steps": [
-        {"step_number": 1, "instruction": "鍋で豚肉と白菜を煮て、しょうゆで味を整える。", "duration_minutes": 8, "equipment": ["鍋"], "parallel_group": "noodle", "depends_on_steps": [], "can_parallelize": false},
-        {"step_number": 2, "instruction": "冷凍うどんを加えて温め、水溶き片栗粉でとろみを付けて全体を絡める。", "duration_minutes": 7, "equipment": ["鍋"], "parallel_group": "noodle", "depends_on_steps": [1], "can_parallelize": false}
+        {"step_number": 1, "instruction": "鍋に豚肉、白菜、水350mlを入れて煮て、しょうゆで味を整える。", "duration_minutes": 8, "equipment": ["鍋"], "parallel_group": "noodle", "depends_on_steps": [], "can_parallelize": false},
+        {"step_number": 2, "instruction": "冷凍うどんを加えて温め、片栗粉を残りの水50mlで溶いて加え、とろみを付けて全体を絡める。", "duration_minutes": 7, "equipment": ["鍋"], "parallel_group": "noodle", "depends_on_steps": [1], "can_parallelize": false}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
@@ -189,7 +191,7 @@
         {"ingredient_name": "サラダ油", "normalized_name": "サラダ油", "quantity": 1, "unit": "小さじ", "scaling_mode": "mostly_fixed", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 5}
       ],
       "steps": [
-        {"step_number": 1, "instruction": "フライパンで豚肉と白菜を炒める。", "duration_minutes": 8, "equipment": ["フライパン"], "parallel_group": "noodle", "depends_on_steps": [], "can_parallelize": false},
+        {"step_number": 1, "instruction": "フライパンにサラダ油を入れて豚肉と白菜を炒める。", "duration_minutes": 8, "equipment": ["フライパン"], "parallel_group": "noodle", "depends_on_steps": [], "can_parallelize": false},
         {"step_number": 2, "instruction": "焼きうどん麺を加えてほぐし、しょうゆで味を整える。", "duration_minutes": 7, "equipment": ["フライパン"], "parallel_group": "noodle", "depends_on_steps": [1], "can_parallelize": false}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
@@ -265,10 +267,11 @@
         {"ingredient_name": "白菜", "normalized_name": "白菜", "quantity": 100, "unit": "g", "scaling_mode": "linear", "rounding_increment": 10, "sort_order": 1},
         {"ingredient_name": "豆腐", "normalized_name": "豆腐", "quantity": 0.5, "unit": "丁", "scaling_mode": "count", "rounding_increment": 0.5, "minimum_quantity": 0.5, "sort_order": 2},
         {"ingredient_name": "みそ", "normalized_name": "みそ", "quantity": 1.5, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 3},
-        {"ingredient_name": "和風だし", "normalized_name": "和風だし", "quantity": 0.5, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 4}
+        {"ingredient_name": "和風だし", "normalized_name": "和風だし", "quantity": 0.5, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 4},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 400, "unit": "ml", "scaling_mode": "linear", "rounding_increment": 10, "basic_seasoning": true, "sort_order": 5}
       ],
       "steps": [
-        {"step_number": 1, "instruction": "鍋に水、だし、白菜を入れてやわらかくなるまで煮る。", "duration_minutes": 7, "equipment": ["鍋"], "parallel_group": "soup", "depends_on_steps": [], "can_parallelize": true},
+        {"step_number": 1, "instruction": "鍋に水400ml、和風だし、白菜を入れてやわらかくなるまで煮る。", "duration_minutes": 7, "equipment": ["鍋"], "parallel_group": "soup", "depends_on_steps": [], "can_parallelize": true},
         {"step_number": 2, "instruction": "豆腐を加えて温め、火を止めてみそを溶く。", "duration_minutes": 3, "equipment": ["鍋"], "parallel_group": "soup", "depends_on_steps": [1], "can_parallelize": true}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
@@ -284,9 +287,10 @@
       "season_months": [], "tags": ["汁物"], "content_status": "published", "source_type": "internal",
       "ingredients": [
         {"ingredient_name": "玉ねぎ", "normalized_name": "玉ねぎ", "quantity": 0.5, "unit": "個", "scaling_mode": "count", "rounding_increment": 0.5, "minimum_quantity": 0.5, "sort_order": 1},
-        {"ingredient_name": "コンソメ", "normalized_name": "コンソメ", "quantity": 1, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 2}
+        {"ingredient_name": "コンソメ", "normalized_name": "コンソメ", "quantity": 1, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 2},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 400, "unit": "ml", "scaling_mode": "linear", "rounding_increment": 10, "basic_seasoning": true, "sort_order": 3}
       ],
-      "steps": [{"step_number": 1, "instruction": "薄切りの玉ねぎを水とコンソメでやわらかくなるまで煮る。", "duration_minutes": 10, "equipment": ["鍋"], "parallel_group": "soup", "depends_on_steps": [], "can_parallelize": true}],
+      "steps": [{"step_number": 1, "instruction": "薄切りの玉ねぎを水400mlとコンソメでやわらかくなるまで煮る。", "duration_minutes": 10, "equipment": ["鍋"], "parallel_group": "soup", "depends_on_steps": [], "can_parallelize": true}],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
     {
@@ -359,9 +363,10 @@
       "ingredients": [
         {"ingredient_name": "じゃがいも", "normalized_name": "じゃがいも", "quantity": 2, "unit": "個", "scaling_mode": "count", "rounding_increment": 1, "minimum_quantity": 1, "sort_order": 1},
         {"ingredient_name": "しょうゆ", "normalized_name": "しょうゆ", "quantity": 1, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 2},
-        {"ingredient_name": "砂糖", "normalized_name": "砂糖", "quantity": 1, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 3}
+        {"ingredient_name": "砂糖", "normalized_name": "砂糖", "quantity": 1, "unit": "小さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 3},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 2, "unit": "大さじ", "scaling_mode": "linear", "rounding_increment": 0.5, "basic_seasoning": true, "sort_order": 4}
       ],
-      "steps": [{"step_number": 1, "instruction": "じゃがいもを一口大に切り、耐熱容器でしょうゆ、砂糖と合わせ、やわらかくなるまで加熱する。", "duration_minutes": 10, "equipment": ["耐熱容器", "電子レンジ"], "parallel_group": "side", "depends_on_steps": [], "can_parallelize": true}],
+      "steps": [{"step_number": 1, "instruction": "じゃがいもを一口大に切り、耐熱容器でしょうゆ、砂糖、水を合わせ、ふんわりラップをしてやわらかくなるまで加熱する。", "duration_minutes": 10, "equipment": ["耐熱容器", "電子レンジ"], "parallel_group": "side", "depends_on_steps": [], "can_parallelize": true}],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
     {
@@ -412,19 +417,21 @@
       "title": "ツナ卵サンド",
       "summary": "ツナと卵をはさむ食べやすいサンドイッチ",
       "base_servings": 2, "dish_roles": ["one_dish", "staple_and_main"],
-      "meal_occasions": ["breakfast", "lunch", "bento"], "cuisine": "洋食", "cooking_method": ["和える", "盛り付け"],
-      "total_minutes": 15, "active_minutes": 12, "difficulty": "easy", "low_energy": false,
-      "bento_suitable": true, "leak_risk": "low", "make_ahead_possible": true,
-      "season_months": [], "tags": ["パン", "弁当"], "content_status": "published", "source_type": "internal",
+      "meal_occasions": ["breakfast", "lunch"], "cuisine": "洋食", "cooking_method": ["ゆでる", "和える", "盛り付け"],
+      "total_minutes": 25, "active_minutes": 10, "difficulty": "easy", "low_energy": false,
+      "bento_suitable": false, "leak_risk": "low", "make_ahead_possible": false,
+      "season_months": [], "tags": ["パン"], "content_status": "published", "source_type": "internal",
       "ingredients": [
         {"ingredient_name": "食パン", "normalized_name": "食パン", "quantity": 4, "unit": "枚", "scaling_mode": "count", "rounding_increment": 2, "minimum_quantity": 2, "sort_order": 1},
         {"ingredient_name": "ツナ", "normalized_name": "ツナ", "quantity": 1, "unit": "缶", "scaling_mode": "count", "rounding_increment": 1, "minimum_quantity": 1, "sort_order": 2},
         {"ingredient_name": "卵", "normalized_name": "卵", "quantity": 2, "unit": "個", "scaling_mode": "count", "rounding_increment": 1, "minimum_quantity": 1, "sort_order": 3},
-        {"ingredient_name": "マヨネーズ", "normalized_name": "マヨネーズ", "quantity": 2, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 4}
+        {"ingredient_name": "マヨネーズ", "normalized_name": "マヨネーズ", "quantity": 2, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 4},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 600, "unit": "ml", "scaling_mode": "mostly_fixed", "rounding_increment": 50, "basic_seasoning": true, "sort_order": 5}
       ],
       "steps": [
-        {"step_number": 1, "instruction": "ゆでた卵をつぶし、油を切ったツナとマヨネーズを和える。", "duration_minutes": 10, "equipment": ["鍋", "ボウル"], "parallel_group": "sandwich", "depends_on_steps": [], "can_parallelize": false},
-        {"step_number": 2, "instruction": "食パンにはさみ、食べやすく切る。", "duration_minutes": 5, "equipment": ["包丁", "まな板"], "parallel_group": "sandwich", "depends_on_steps": [1], "can_parallelize": false}
+        {"step_number": 1, "instruction": "鍋に卵と卵がかぶる量の水を入れ、沸騰後10分を目安にゆでる。", "duration_minutes": 15, "equipment": ["鍋"], "parallel_group": "sandwich", "depends_on_steps": [], "can_parallelize": false},
+        {"step_number": 2, "instruction": "卵を取り出して冷まし、殻をむいてつぶし、油を切ったツナとマヨネーズを和える。", "duration_minutes": 5, "equipment": ["ボウル"], "parallel_group": "sandwich", "depends_on_steps": [1], "can_parallelize": false},
+        {"step_number": 3, "instruction": "食パンにはさみ、食べやすく切る。", "duration_minutes": 5, "equipment": ["包丁", "まな板"], "parallel_group": "sandwich", "depends_on_steps": [2], "can_parallelize": false}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     },
@@ -455,11 +462,12 @@
       "ingredients": [
         {"ingredient_name": "冷凍ごはん", "normalized_name": "冷凍ごはん", "quantity": 2, "unit": "個", "scaling_mode": "count", "rounding_increment": 1, "minimum_quantity": 1, "sort_order": 1},
         {"ingredient_name": "卵", "normalized_name": "卵", "quantity": 2, "unit": "個", "scaling_mode": "count", "rounding_increment": 1, "minimum_quantity": 1, "sort_order": 2},
-        {"ingredient_name": "しょうゆ", "normalized_name": "しょうゆ", "quantity": 1, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 3}
+        {"ingredient_name": "しょうゆ", "normalized_name": "しょうゆ", "quantity": 1, "unit": "大さじ", "scaling_mode": "seasoning", "rounding_increment": 0.25, "basic_seasoning": true, "sort_order": 3},
+        {"ingredient_name": "水", "normalized_name": "水", "quantity": 2, "unit": "大さじ", "scaling_mode": "linear", "rounding_increment": 0.5, "basic_seasoning": true, "sort_order": 4}
       ],
       "steps": [
         {"step_number": 1, "instruction": "冷凍ごはんを表示どおり電子レンジで温める。", "duration_minutes": 5, "equipment": ["電子レンジ"], "parallel_group": "rice", "depends_on_steps": [], "can_parallelize": true},
-        {"step_number": 2, "instruction": "耐熱容器で溶き卵としょうゆを加熱し、温めたごはんにのせる。", "duration_minutes": 5, "equipment": ["耐熱容器", "電子レンジ"], "parallel_group": "egg", "depends_on_steps": [], "can_parallelize": true}
+        {"step_number": 2, "instruction": "耐熱容器で溶き卵、しょうゆ、水を混ぜ、卵が固まるまで加熱して温めたごはんにのせる。", "duration_minutes": 5, "equipment": ["耐熱容器", "電子レンジ"], "parallel_group": "egg", "depends_on_steps": [], "can_parallelize": true}
       ],
       "sources": [{"source_name": "おやこ時間ごはんAI 内部レシピ", "source_url": "", "source_type": "internal", "license_or_usage_note": "独自作成", "source_role": "primary"}]
     }

@@ -30,6 +30,12 @@ create table if not exists public.recipes (
     ),
     constraint recipes_occasions_valid check (
         meal_occasions <@ array['breakfast', 'lunch', 'bento', 'dinner', 'otsumami']::text[]
+    ),
+    constraint recipes_active_minutes_not_over_total check (
+        active_minutes <= total_minutes
+    ),
+    constraint recipes_season_months_valid check (
+        season_months <@ array[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]::integer[]
     )
 );
 
@@ -48,7 +54,16 @@ create table if not exists public.recipe_ingredients (
     basic_seasoning boolean not null default false,
     substitutes text[] not null default '{}',
     sort_order integer not null default 0,
-    constraint recipe_ingredients_name_not_blank check (length(btrim(ingredient_name)) > 0)
+    constraint recipe_ingredients_name_not_blank check (length(btrim(ingredient_name)) > 0),
+    constraint recipe_ingredients_quantity_positive check (
+        quantity is null or quantity > 0
+    ),
+    constraint recipe_ingredients_rounding_increment_positive check (
+        rounding_increment is null or rounding_increment > 0
+    ),
+    constraint recipe_ingredients_minimum_quantity_nonnegative check (
+        minimum_quantity is null or minimum_quantity >= 0
+    )
 );
 
 create table if not exists public.recipe_steps (
@@ -117,6 +132,25 @@ create index if not exists recipe_history_user_selected_idx
 create index if not exists recipe_collection_topics_status_idx
     on public.recipe_collection_topics(status, priority_score desc);
 
+-- This repository has no shared updated_at trigger function to reuse, so the
+-- catalog owns a narrowly scoped one. It is safe to call for every row update.
+create or replace function public.set_recipe_updated_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+    new.updated_at = now();
+    return new;
+end;
+$$;
+
+drop trigger if exists recipes_set_updated_at on public.recipes;
+create trigger recipes_set_updated_at
+    before update on public.recipes
+    for each row
+    execute function public.set_recipe_updated_at();
+
 alter table public.recipes enable row level security;
 alter table public.recipe_ingredients enable row level security;
 alter table public.recipe_steps enable row level security;
@@ -154,21 +188,10 @@ create policy "published recipe sources are readable"
           and recipes.content_status = 'published'
     ));
 
--- LINE user ids are stored by the service role.  A future authenticated client
--- can read/write only a row whose user_id is its own auth subject; all other
--- history remains invisible. Service-role requests bypass RLS in Supabase.
-create policy "users can read only own recipe history"
-    on public.recipe_proposal_history for select to authenticated
-    using (auth.uid()::text = user_id);
-
-create policy "users can insert only own recipe history"
-    on public.recipe_proposal_history for insert to authenticated
-    with check (auth.uid()::text = user_id);
-
-create policy "users can update only own recipe history"
-    on public.recipe_proposal_history for update to authenticated
-    using (auth.uid()::text = user_id)
-    with check (auth.uid()::text = user_id);
+-- recipe_proposal_history.user_id stores a LINE user id, not a Supabase Auth
+-- subject. RLS stays enabled and no anon/authenticated policy is created, so
+-- the table is service-role-only. If a future client uses Supabase Auth, add a
+-- separate auth_user_id and write policies against that column instead.
 
 -- Collection topics are aggregate operational data. No anon/authenticated
 -- policy is created, so only the service role can access them.
