@@ -142,6 +142,9 @@ _NEW_MEAL_CONSULTATION = re.compile(
     r"今日.*どうしよ|今夜.*どうしよ|ボリュームがある|がっつり|あっさり|"
     r"\d+\s*人分がいい|肉を使いたい|野菜を多め|買い足しなし)"
 )
+_MEAL_PLANNING_REQUEST = re.compile(
+    r"(?:ご飯|ごはん|食事|メニュー|献立)(?:を|は)?\s*考えて"
+)
 
 
 def _clear_meal_conversation_state(user_id: str) -> None:
@@ -423,12 +426,15 @@ def datetime_from_timestamp(value: float) -> str:
 def _is_catalog_meal_request(message: str, stocks: list[str]) -> bool:
     normalized = unicodedata.normalize("NFKC", str(message or "")).strip()
     return bool(
-        is_food_related(normalized, stocks)
-        and re.search(
-            r"(どうしよ|どうする|何作|作れる|献立|食べたい|作りたい|"
-            r"朝食|朝ごはん|昼食|ランチ|弁当|夕食|夕飯|晩ごはん|"
-            r"夜ごはん|つまみ|がっつり|あっさり|ボリューム)",
-            normalized,
+        _MEAL_PLANNING_REQUEST.search(normalized)
+        or (
+            is_food_related(normalized, stocks)
+            and re.search(
+                r"(どうしよ|どうする|何作|作れる|献立|食べたい|作りたい|"
+                r"朝食|朝ごはん|昼食|ランチ|弁当|夕食|夕飯|晩ごはん|"
+                r"夜ごはん|つまみ|がっつり|あっさり|ボリューム)",
+                normalized,
+            )
         )
     )
 

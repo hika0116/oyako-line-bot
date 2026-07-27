@@ -41,6 +41,64 @@ class MealOccasionFlowTests(unittest.TestCase):
         self.assertTrue(line_app._get_valid_pending_meal_request("u1"))
         generate.assert_not_called()
 
+    def test_meal_planning_phrases_ask_for_occasion_without_calling_ai(self):
+        messages = (
+            "今日のご飯を考えて",
+            "今日のごはんを考えて",
+            "ご飯を考えて",
+            "ごはんを考えて",
+            "メニューを考えて",
+            "献立を考えて",
+        )
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3] as generate:
+            for index, message in enumerate(messages):
+                user_id = f"meal-planning-{index}"
+                with self.subTest(message=message):
+                    reply = line_app.handle_normal_message(user_id, message)
+                    self.assertEqual(reply, line_app.meal_occasion_prompt())
+                    pending = line_app._get_valid_pending_meal_request(user_id)
+                    self.assertEqual(
+                        pending["conditions"]["original_message"],
+                        message,
+                    )
+        generate.assert_not_called()
+
+    def test_explicit_dinner_planning_phrase_skips_question_and_ai(self):
+        patches = self._patches()
+        with patches[0], patches[1], patches[2], patches[3] as generate:
+            reply = line_app.handle_normal_message("u1", "夕食を考えて")
+        self.assertNotEqual(reply, line_app.meal_occasion_prompt())
+        self.assertIn("約", reply)
+        self.assertEqual(
+            line_app.last_suggestions["u1"]["meal_occasion"],
+            "dinner",
+        )
+        self.assertNotIn("u1", line_app.pending_meal_requests)
+        generate.assert_not_called()
+
+    def test_non_food_thinking_request_does_not_enter_catalog_flow(self):
+        response = line_app.StructuredResponse(
+            response_mode="LISTEN",
+            safety_level="none",
+            message="一緒に整理しましょう。",
+            prompt_version="1.0",
+        )
+        with patch.object(line_app, "get_profile", return_value=self.profile), \
+             patch.object(line_app, "get_stocks", return_value=self.stocks), \
+             patch.object(line_app, "save_meal_log") as save, \
+             patch.object(
+                 line_app,
+                 "generate_structured_reply",
+                 return_value=response,
+             ) as generate:
+            reply = line_app.handle_normal_message("u1", "今後のことを考えて")
+        self.assertEqual(reply, "一緒に整理しましょう。")
+        self.assertNotIn("u1", line_app.pending_meal_requests)
+        self.assertNotIn("u1", line_app.last_suggestions)
+        generate.assert_called_once()
+        save.assert_not_called()
+
     def test_non_food_message_exits_pending_flow(self):
         patches = self._patches()
         response = line_app.StructuredResponse(
